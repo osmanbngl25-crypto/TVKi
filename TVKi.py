@@ -5,8 +5,8 @@ import streamlit as st
 
 st.set_page_config(
     page_title="TVKi",
-    page_icon="logo.png",
-    layout="wide",
+    page_icon="logo.png",  # İşte burası hem tarayıcı sekmesinde hem de telefonda ana ekrana ekleyince logonun çıkmasını sağlar
+    layout="centered"
 )
 
 st.markdown(
