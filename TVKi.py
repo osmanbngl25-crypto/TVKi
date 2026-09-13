@@ -240,6 +240,8 @@ def add_to_list(l_type, m_data):
   if not supabase:
     return
   try:
+    m_type = m_data.get("media_type") or m_data.get("type", "Film")
+
     chk = (
         supabase.table("user_lists")
         .select("*")
@@ -253,8 +255,8 @@ def add_to_list(l_type, m_data):
           "username": st.session_state.username,
           "list_type": l_type,
           "title": m_data["title"],
-          "media_type": m_data["type"],
-          "poster": m_data["poster"],
+          "media_type": m_type,
+          "poster": m_data.get("poster"),
       }).execute()
   except Exception as e:
     st.error(f"Hata: {e}")
@@ -368,7 +370,7 @@ with tab_ana:
 
             m_data = {
                 "title": name,
-                "type": "Oyuncu",
+                "media_type": "Oyuncu",
                 "poster": poster_url,
             }
 
@@ -377,6 +379,7 @@ with tab_ana:
               if st.button("❤️ Favori", key=f"f_actor_{index}"):
                 add_to_list("favorites", m_data)
                 st.success("Oyuncu favorilere eklendi!")
+                st.rerun()
 
             st.markdown("#### Oynadığı Yapımlar (Kronolojik)")
             filmography = get_actor_filmography(actor_id)
@@ -488,7 +491,7 @@ with tab_ana:
 
             m_data = {
                 "title": full_media_title,
-                "type": media_type,
+                "media_type": media_type,
                 "poster": poster_url,
             }
 
@@ -497,14 +500,17 @@ with tab_ana:
               if st.button("❤️ Favori", key=f"f_{index}"):
                 add_to_list("favorites", m_data)
                 st.success("Favorilere eklendi!")
+                st.rerun()
             with col2:
               if st.button("📌 İzle", key=f"w_{index}"):
                 add_to_list("watchlist", m_data)
                 st.success("İzleneceklere eklendi!")
+                st.rerun()
             with col3:
               if st.button("✅ İzledim", key=f"wd_{index}"):
                 add_to_list("watched", m_data)
                 st.success("İzlenenlere eklendi!")
+                st.rerun()
             with col4:
               with st.popover("📤 Paylaş", use_container_width=True):
                 st.write("Kime gönderilsin?")
@@ -551,7 +557,7 @@ with tab_ana:
         st.error("Film araması yapılırken bağlantı kurulamadı.")
 
 
-# 2. NE İZLEMELİYİM? (Güncellenmiş Bölüm)
+# 2. NE İZLEMELİYİM?
 with tab_ne_izlesem:
   st.title("✨ Ne İzlemeliyim?")
   st.write(
@@ -576,12 +582,11 @@ with tab_ne_izlesem:
 
   with col_wizard2:
     if genres_dict:
-      # İlk açılışta boş gelmesi için seçenek listesinin başına boş bir eleman ekledik
       genre_options = [""] + list(genres_dict.keys())
       selected_genre_name = st.selectbox(
-          "Tür Seç", genre_options, index=0, key="wiz_genre"
+          "Tür", genre_options, index=0, key="wiz_genre"
       )
-      
+
       if selected_genre_name:
         selected_genre_id = genres_dict[selected_genre_name]
       else:
@@ -600,12 +605,10 @@ with tab_ne_izlesem:
         key="btn_wiz_refresh",
     )
 
-  # Kullanıcı tür seçmeden rastgele sonuç getirmesini engelliyor ve boş bırakıyoruz
   if not selected_genre_id:
-    st.info("👆 Başlamak için yukarıdan lütfen bir **Tür** seç!")
+    st.info("👆 Başlamak için yukarıdan lütfen bir Tür seç!")
   else:
     try:
-      # Sadece güncel yıla takılmamak için sayfa aralığını genişlettik (1 ile 40 arası)
       rand_page = random.randint(1, 40)
       discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
       disc_res = requests.get(discover_url, timeout=5).json().get("results", [])
@@ -646,7 +649,7 @@ with tab_ne_izlesem:
 
           m_data = {
               "title": full_media_title,
-              "type": wiz_type,
+              "media_type": wiz_type,
               "poster": poster_url,
           }
 
@@ -655,14 +658,17 @@ with tab_ne_izlesem:
             if st.button("❤️ Favori", key=f"wiz_f_{idx}"):
               add_to_list("favorites", m_data)
               st.success("Favorilere eklendi!")
+              st.rerun()
           with c_w2:
             if st.button("📌 İzle", key=f"wiz_w_{idx}"):
               add_to_list("watchlist", m_data)
               st.success("İzleneceklere eklendi!")
+              st.rerun()
           with c_w3:
             if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
               add_to_list("watched", m_data)
               st.success("İzlenenlere eklendi!")
+              st.rerun()
           with c_w4:
             with st.popover("📤 Paylaş", use_container_width=True):
               st.write("Kime gönderilsin?")
@@ -1136,69 +1142,130 @@ with tab_arkadas:
       st.write("❤️ **Favori Filmleri:**")
       if f_fav_movies:
         for it in f_fav_movies:
-          col_fm1, col_fm2, col_fm3 = st.columns([1, 5, 2])
-          with col_fm1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_fm2:
-            st.write(f"**{it['title']}**")
-          with col_fm3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"ff_m_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"ff_m_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"ff_m_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"ff_mov_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"ff_mov_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_ff_mov_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_ff_mov_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Film")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
       st.write("❤️ **Favori Dizileri:**")
       if f_fav_shows:
         for it in f_fav_shows:
-          col_fs1, col_fs2, col_fs3 = st.columns([1, 5, 2])
-          with col_fs1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_fs2:
-            st.write(f"**{it['title']}**")
-          with col_fs3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"ff_s_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"ff_s_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"ff_s_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"ff_sho_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"ff_sho_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_ff_sho_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_ff_sho_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Dizi")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
       st.write("❤️ **Favori Oyuncuları:**")
       if f_fav_actors:
         for it in f_fav_actors:
-          col_fa1, col_fa2, col_fa3 = st.columns([1, 5, 2])
-          with col_fa1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_fa2:
-            st.write(f"**{it['title']}**")
-          with col_fa3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2 = st.columns([1, 3])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"ff_a_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"ff_act_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"ff_act_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_ff_act_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_ff_act_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Oyuncu")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
@@ -1206,46 +1273,96 @@ with tab_arkadas:
       st.write("📌 **İzleyeceği Filmler:**")
       if f_w_movies:
         for it in f_w_movies:
-          col_wm1, col_wm2, col_wm3 = st.columns([1, 5, 2])
-          with col_wm1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_wm2:
-            st.write(f"**{it['title']}**")
-          with col_wm3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"fw_m_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"fw_m_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"fw_m_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"fw_mov_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"fw_mov_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_fw_mov_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_fw_mov_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Film")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
       st.write("📌 **İzleyeceği Diziler:**")
       if f_w_shows:
         for it in f_w_shows:
-          col_ws1, col_ws2, col_ws3 = st.columns([1, 5, 2])
-          with col_ws1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_ws2:
-            st.write(f"**{it['title']}**")
-          with col_ws3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"fw_s_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"fw_s_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"fw_s_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"fw_sho_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"fw_sho_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_fw_sho_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_fw_sho_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Dizi")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
@@ -1253,46 +1370,96 @@ with tab_arkadas:
       st.write("✅ **İzlediği Filmler:**")
       if f_wd_movies:
         for it in f_wd_movies:
-          col_wdm1, col_wdm2, col_wdm3 = st.columns([1, 5, 2])
-          with col_wdm1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_wdm2:
-            st.write(f"**{it['title']}**")
-          with col_wdm3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"fwd_m_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"fwd_m_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"fwd_m_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"fwd_mov_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"fwd_mov_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_fwd_mov_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_fwd_mov_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Film")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
 
       st.write("✅ **İzlediği Diziler:**")
       if f_wd_shows:
         for it in f_wd_shows:
-          col_wds1, col_wds2, col_wds3 = st.columns([1, 5, 2])
-          with col_wds1:
-            if it.get("poster"):
-              st.image(it["poster"], width=60)
-          with col_wds2:
-            st.write(f"**{it['title']}**")
-          with col_wds3:
-            with st.popover("Paylaş"):
+          st.write(f"**{it['title']}**")
+          if it.get("poster"):
+            st.image(it["poster"], width=80)
+
+          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
+          with b1:
+            if st.button(
+                "❤️ Favori", key=f"fwd_s_fav_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("favorites", it)
+              st.success("Favorilere eklendi!")
+              st.rerun()
+          with b2:
+            if st.button(
+                "📌 İzle", key=f"fwd_s_wat_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watchlist", it)
+              st.success("İzleneceklere eklendi!")
+              st.rerun()
+          with b3:
+            if st.button(
+                "✅ İzledim", key=f"fwd_s_wed_{selected_friend}_{it['title']}"
+            ):
+              add_to_list("watched", it)
+              st.success("İzlenenlere eklendi!")
+              st.rerun()
+          with b4:
+            with st.popover("📤 Paylaş"):
               st.write("Kime gönderilsin?")
               if friends:
                 tf = st.selectbox(
-                    "Arkadaş", friends, key=f"fwd_sho_{it['title']}"
+                    "Arkadaş",
+                    friends,
+                    key=f"fwd_sho_{selected_friend}_{it['title']}",
                 )
-                if st.button("Gönder", key=f"btn_fwd_sho_{it['title']}"):
+                if st.button(
+                    "Gönder", key=f"btn_fwd_sho_{selected_friend}_{it['title']}"
+                ):
                   send_media_to_chat(tf, it["title"], "Dizi")
               else:
                 st.warning("Arkadaşın yok.")
+          st.divider()
       else:
         st.write("Boş.")
   else:
