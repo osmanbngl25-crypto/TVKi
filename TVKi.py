@@ -1,7 +1,6 @@
-import os
 import random
 import requests
-from supabase import Client, create_client
+from supabase import create_client
 import streamlit as st
 
 st.set_page_config(
@@ -178,7 +177,7 @@ def send_media_to_chat(receiver, media_title, media_type):
 def get_movie_cast_detailed(media_id, tmdb_type):
   try:
     url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/credits?api_key={TMDB_API_KEY}&language=tr-TR"
-    res = requests.get(url, timeout=5).json()
+    res = requests.get(url, timeout=10).json()
     cast = res.get("cast", [])
     actors = []
     for actor in cast:
@@ -199,7 +198,7 @@ def get_movie_cast_detailed(media_id, tmdb_type):
 def get_actor_filmography(actor_id):
   try:
     url = f"https://api.themoviedb.org/3/person/{actor_id}/combined_credits?api_key={TMDB_API_KEY}&language=tr-TR"
-    res = requests.get(url, timeout=5).json()
+    res = requests.get(url, timeout=10).json()
     cast_list = res.get("cast", [])
 
     valid_media = []
@@ -309,6 +308,7 @@ st.divider()
     tab_fav,
     tab_watch,
     tab_watched,
+    tab_yarida,
     tab_profil,
     tab_ara,
     tab_istek,
@@ -320,6 +320,7 @@ st.divider()
     "❤️ Favoriler",
     "📌 İzlenecek",
     "✅ İzlenen",
+    "⏳ Yarıda Kalanlar",
     "👤 Profil",
     "🔍 Kullanıcı Ara",
     "📩 İstekler",
@@ -350,7 +351,7 @@ with tab_ana:
     if search_query:
       try:
         url = f"https://api.themoviedb.org/3/search/person?api_key={TMDB_API_KEY}&language=tr-TR&query={search_query}"
-        res = requests.get(url, timeout=5).json().get("results", [])
+        res = requests.get(url, timeout=10).json().get("results", [])
 
         if res:
           st.success(f"{len(res)} oyuncu bulundu:")
@@ -446,8 +447,8 @@ with tab_ana:
             st.divider()
         else:
           st.warning("Oyuncu bulunamadı.")
-      except Exception:
-        st.error("Oyuncu araması yapılırken bağlantı kurulamadı.")
+      except Exception as e:
+        st.error(f"Oyuncu araması yapılırken bağlantı kurulamadı: {e}")
   else:
     tmdb_type = "movie" if media_type == "Film" else "tv"
     search_query = st.text_input(
@@ -459,7 +460,7 @@ with tab_ana:
     if search_query:
       try:
         url = f"https://api.themoviedb.org/3/search/{tmdb_type}?api_key={TMDB_API_KEY}&language=tr-TR&query={search_query}"
-        res = requests.get(url, timeout=5).json().get("results", [])
+        res = requests.get(url, timeout=10).json().get("results", [])
 
         if res:
           st.success(f"{len(res)} sonuç bulundu:")
@@ -495,7 +496,7 @@ with tab_ana:
                 "poster": poster_url,
             }
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
               if st.button("❤️ Favori", key=f"f_{index}"):
                 add_to_list("favorites", m_data)
@@ -512,6 +513,11 @@ with tab_ana:
                 st.success("İzlenenlere eklendi!")
                 st.rerun()
             with col4:
+              if st.button("⏳ Yarıda", key=f"half_{index}"):
+                add_to_list("unfinished", m_data)
+                st.success("Yarıda kalanlara eklendi!")
+                st.rerun()
+            with col5:
               with st.popover("📤 Paylaş", use_container_width=True):
                 st.write("Kime gönderilsin?")
                 if friends_list:
@@ -524,7 +530,7 @@ with tab_ana:
                     send_media_to_chat(target_f, full_media_title, media_type)
                 else:
                   st.warning("Henüz arkadaşın yok.")
-            with col5:
+            with col6:
               if st.button("🎭 Oyuncular", key=f"cast_btn_{index}"):
                 st.session_state[f"show_cast_{index}"] = not st.session_state.get(
                     f"show_cast_{index}", False
@@ -553,8 +559,8 @@ with tab_ana:
             st.divider()
         else:
           st.warning("Sonuç bulunamadı.")
-      except Exception:
-        st.error("Film araması yapılırken bağlantı kurulamadı.")
+      except Exception as e:
+        st.error(f"Film araması yapılırken bağlantı kurulamadı: {e}")
 
 
 # 2. NE İZLEMELİYİM?
@@ -575,10 +581,10 @@ with tab_ne_izlesem:
   genres_dict = {}
   try:
     g_url = f"https://api.themoviedb.org/3/genre/{tmdb_t_type}/list?api_key={TMDB_API_KEY}&language=tr-TR"
-    g_res = requests.get(g_url, timeout=5).json()
+    g_res = requests.get(g_url, timeout=10).json()
     genres_dict = {g["name"]: g["id"] for g in g_res.get("genres", [])}
-  except:
-    pass
+  except Exception as e:
+    st.error(f"Türler yüklenirken hata oluştu: {e}")
 
   with col_wizard2:
     if genres_dict:
@@ -594,7 +600,6 @@ with tab_ne_izlesem:
     else:
       selected_genre_name = None
       selected_genre_id = None
-      st.warning("Türler yüklenemedi.")
 
   with col_wizard3:
     st.write("")
@@ -609,81 +614,91 @@ with tab_ne_izlesem:
     st.info("👆 Başlamak için yukarıdan lütfen bir Tür seç!")
   else:
     try:
-      rand_page = random.randint(1, 40)
+      # TMDB discover uç noktası genelde en fazla 500 sayfaya izin verir, güvenli aralık seçelim
+      rand_page = random.randint(1, 20)
       discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
-      disc_res = requests.get(discover_url, timeout=5).json().get("results", [])
+      disc_response = requests.get(discover_url, timeout=10)
+      
+      if disc_response.status_code == 200:
+        disc_res = disc_response.json().get("results", [])
+        if disc_res:
+          random.shuffle(disc_res)
+          recommendations = disc_res[:10]
 
-      if disc_res:
-        random.shuffle(disc_res)
-        recommendations = disc_res[:10]
+          st.success(f"Seçilen türe uygun {len(recommendations)} öneri listelendi:")
+          friends_list = get_accepted_friends(st.session_state.username)
 
-        st.success(f"Seçilen türe uygun {len(recommendations)} öneri listelendi:")
-        friends_list = get_accepted_friends(st.session_state.username)
+          for idx, item in enumerate(recommendations):
+            title = (
+                item.get("title")
+                if tmdb_t_type == "movie"
+                else item.get("name")
+            )
+            overview = item.get("overview")
+            poster_path = item.get("poster_path")
+            date_str = (
+                item.get("release_date", "Bilinmiyor")
+                if tmdb_t_type == "movie"
+                else item.get("first_air_date", "Bilinmiyor")
+            )
+            year = f" ({date_str[:4]})" if len(date_str) >= 4 else ""
+            full_media_title = f"{title}{year}"
 
-        for idx, item in enumerate(recommendations):
-          title = (
-              item.get("title")
-              if tmdb_t_type == "movie"
-              else item.get("name")
-          )
-          overview = item.get("overview")
-          poster_path = item.get("poster_path")
-          date_str = (
-              item.get("release_date", "Bilinmiyor")
-              if tmdb_t_type == "movie"
-              else item.get("first_air_date", "Bilinmiyor")
-          )
-          year = f" ({date_str[:4]})" if len(date_str) >= 4 else ""
-          full_media_title = f"{title}{year}"
+            st.subheader(full_media_title)
+            poster_url = (
+                f"https://image.tmdb.org/t/p/w500{poster_path}"
+                if poster_path
+                else None
+            )
+            if poster_url:
+              st.image(poster_url, width=150)
 
-          st.subheader(full_media_title)
-          poster_url = (
-              f"https://image.tmdb.org/t/p/w500{poster_path}"
-              if poster_path
-              else None
-          )
-          if poster_url:
-            st.image(poster_url, width=150)
+            st.write(overview if overview else "Özet bulunmuyor.")
 
-          st.write(overview if overview else "Özet bulunmuyor.")
+            m_data = {
+                "title": full_media_title,
+                "media_type": wiz_type,
+                "poster": poster_url,
+            }
 
-          m_data = {
-              "title": full_media_title,
-              "media_type": wiz_type,
-              "poster": poster_url,
-          }
+            c_w1, c_w2, c_w3, c_w4, c_w5 = st.columns(5)
+            with c_w1:
+              if st.button("❤️ Favori", key=f"wiz_f_{idx}"):
+                add_to_list("favorites", m_data)
+                st.success("Favorilere eklendi!")
+                st.rerun()
+            with c_w2:
+              if st.button("📌 İzle", key=f"wiz_w_{idx}"):
+                add_to_list("watchlist", m_data)
+                st.success("İzleneceklere eklendi!")
+                st.rerun()
+            with c_w3:
+              if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
+                add_to_list("watched", m_data)
+                st.success("İzlenenlere eklendi!")
+                st.rerun()
+            with c_w4:
+              if st.button("⏳ Yarıda", key=f"wiz_half_{idx}"):
+                add_to_list("unfinished", m_data)
+                st.success("Yarıda kalanlara eklendi!")
+                st.rerun()
+            with c_w5:
+              with st.popover("📤 Paylaş", use_container_width=True):
+                st.write("Kime gönderilsin?")
+                if friends_list:
+                  target_f = st.selectbox(
+                      "Arkadaş", friends_list, key=f"wiz_share_{idx}"
+                  )
+                  if st.button("Sohbete Gönder", key=f"wiz_share_btn_{idx}"):
+                    send_media_to_chat(target_f, full_media_title, wiz_type)
+                else:
+                  st.warning("Henüz arkadaşın yok.")
 
-          c_w1, c_w2, c_w3, c_w4 = st.columns(4)
-          with c_w1:
-            if st.button("❤️ Favori", key=f"wiz_f_{idx}"):
-              add_to_list("favorites", m_data)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with c_w2:
-            if st.button("📌 İzle", key=f"wiz_w_{idx}"):
-              add_to_list("watchlist", m_data)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with c_w3:
-            if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
-              add_to_list("watched", m_data)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with c_w4:
-            with st.popover("📤 Paylaş", use_container_width=True):
-              st.write("Kime gönderilsin?")
-              if friends_list:
-                target_f = st.selectbox(
-                    "Arkadaş", friends_list, key=f"wiz_share_{idx}"
-                )
-                if st.button("Sohbete Gönder", key=f"wiz_share_btn_{idx}"):
-                  send_media_to_chat(target_f, full_media_title, wiz_type)
-              else:
-                st.warning("Henüz arkadaşın yok.")
-
-          st.divider()
+            st.divider()
+        else:
+          st.warning("Bu türde gösterilecek içerik bulunamadı.")
       else:
-        st.warning("Bu türde gösterilecek içerik bulunamadı.")
+        st.warning("API üzerinden veri çekilemedi, lütfen tekrar deneyin.")
     except Exception as e:
       st.error(f"Öneriler getirilirken hata oluştu: {e}")
 
@@ -902,7 +917,99 @@ with tab_watched:
     st.info("İzlenen dizi bulunmuyor.")
 
 
-# 6. PROFİL & AYARLAR
+# 6. YARIDA KALANLAR
+with tab_yarida:
+  st.title("Yarıda Kalanlar")
+  items = get_user_lists(st.session_state.username, "unfinished")
+  friends_list = get_accepted_friends(st.session_state.username)
+
+  half_movies = [i for i in items if i["media_type"] == "Film"]
+  half_shows = [i for i in items if i["media_type"] == "Dizi"]
+
+  st.subheader("🎬 Filmler")
+  if half_movies:
+    for item in half_movies:
+      st.write(f"⏳ **{item['title']}**")
+      if item.get("poster"):
+        st.image(item["poster"], width=100)
+
+      with st.form(key=f"form_half_mov_{item['title']}"):
+        progress_val = st.text_input(
+            "Kaldığın Anı Yaz (Örn: 1.25.32)",
+            placeholder="1.25.32",
+            key=f"input_half_mov_{item['title']}",
+        )
+        submitted_mov = st.form_submit_button("Güncelle / Kaydet")
+        if submitted_mov:
+          if progress_val.strip():
+            st.success(
+                f"**{item['title']}** için kaldığın yer ({progress_val})"
+                " kaydedildi!"
+            )
+
+      c1, c2 = st.columns(2)
+      with c1:
+        if st.button("Listeden Kaldır", key=f"rem_half_mov_{item['title']}"):
+          remove_from_list("unfinished", item["title"])
+          st.rerun()
+      with c2:
+        with st.popover("Paylaş"):
+          st.write("Kime gönderilsin?")
+          if friends_list:
+            tf = st.selectbox(
+                "Arkadaş", friends_list, key=f"p_half_mov_{item['title']}"
+            )
+            if st.button("Gönder", key=f"btn_p_half_mov_{item['title']}"):
+              send_media_to_chat(tf, item["title"], "Film")
+          else:
+            st.warning("Arkadaşın yok.")
+  else:
+    st.info("Yarıda kalan film bulunmuyor.")
+
+  st.divider()
+
+  st.subheader("📺 Diziler")
+  if half_shows:
+    for item in half_shows:
+      st.write(f"⏳ **{item['title']}**")
+      if item.get("poster"):
+        st.image(item["poster"], width=100)
+
+      with st.form(key=f"form_half_sho_{item['title']}"):
+        progress_val_show = st.text_input(
+            "Kaldığın Sezon/Bölüm Yaz (Örn: 4.sezon 9.bölüm)",
+            placeholder="4.sezon 9.bölüm",
+            key=f"input_half_sho_{item['title']}",
+        )
+        submitted_show = st.form_submit_button("Güncelle / Kaydet")
+        if submitted_show:
+          if progress_val_show.strip():
+            st.success(
+                f"**{item['title']}** için kaldığın yer ({progress_val_show})"
+                " kaydedildi!"
+            )
+
+      c1, c2 = st.columns(2)
+      with c1:
+        if st.button("Listeden Kaldır", key=f"rem_half_sho_{item['title']}"):
+          remove_from_list("unfinished", item["title"])
+          st.rerun()
+      with c2:
+        with st.popover("Paylaş"):
+          st.write("Kime gönderilsin?")
+          if friends_list:
+            tf = st.selectbox(
+                "Arkadaş", friends_list, key=f"p_half_sho_{item['title']}"
+            )
+            if st.button("Gönder", key=f"btn_p_half_sho_{item['title']}"):
+              send_media_to_chat(tf, item["title"], "Dizi")
+          else:
+            st.warning("Arkadaşın yok.")
+  else:
+    st.info("Yarıda kalan dizi bulunmuyor.")
+
+
+# 7. PROFİL & AYARLAR
 with tab_profil:
   st.title("Profil Ayarları")
   user_info = get_user_profile(st.session_state.username)
@@ -971,7 +1078,7 @@ with tab_profil:
       st.rerun()
 
 
-# 7. KULLANICI ARA
+# 8. KULLANICI ARA
 with tab_ara:
   st.title("Kullanıcı Ara")
   search_u = st.text_input(
@@ -1032,7 +1139,7 @@ with tab_ara:
         st.warning("Arama sırasında hata oluştu.")
 
 
-# 8. TAKİP İSTEKLERİ
+# 9. TAKİP İSTEKLERİ
 with tab_istek:
   st.title("Gelen Takip İstekleri")
   reqs = []
@@ -1089,7 +1196,7 @@ with tab_istek:
     st.info("Bekleyen takip isteğin yok.")
 
 
-# 9. ARKADAŞLARIM
+# 10. ARKADAŞLARIM
 with tab_arkadas:
   col_head1, col_head2 = st.columns([6, 1])
   with col_head1:
@@ -1466,7 +1573,7 @@ with tab_arkadas:
     st.info("Henüz ekli bir arkadaşın yok.")
 
 
-# 10. SOHBET ODASI
+# 11. SOHBET ODASI
 with tab_sohbet:
   st.title("Sohbet Odası")
 
