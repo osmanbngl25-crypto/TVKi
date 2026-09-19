@@ -115,14 +115,24 @@ def get_user_lists(uname, l_type):
   try:
     res = (
         supabase.table("user_lists")
-        .select("title, media_type, poster")
+        .select("title, media_type, poster, progress")
         .eq("username", uname)
         .eq("list_type", l_type)
         .execute()
     )
     return res.data
   except:
-    return []
+    try:
+      res = (
+          supabase.table("user_lists")
+          .select("title, media_type, poster")
+          .eq("username", uname)
+          .eq("list_type", l_type)
+          .execute()
+      )
+      return res.data
+    except:
+      return []
 
 
 def get_user_profile(uname):
@@ -250,15 +260,36 @@ def add_to_list(l_type, m_data):
         .execute()
     )
     if not chk.data:
-      supabase.table("user_lists").insert({
-          "username": st.session_state.username,
-          "list_type": l_type,
-          "title": m_data["title"],
-          "media_type": m_type,
-          "poster": m_data.get("poster"),
-      }).execute()
+      try:
+        supabase.table("user_lists").insert({
+            "username": st.session_state.username,
+            "list_type": l_type,
+            "title": m_data["title"],
+            "media_type": m_type,
+            "poster": m_data.get("poster"),
+            "progress": "",
+        }).execute()
+      except:
+        supabase.table("user_lists").insert({
+            "username": st.session_state.username,
+            "list_type": l_type,
+            "title": m_data["title"],
+            "media_type": m_type,
+            "poster": m_data.get("poster"),
+        }).execute()
   except Exception as e:
     st.error(f"Hata: {e}")
+
+
+def update_progress_in_db(l_type, title, progress_val):
+  if not supabase:
+    return
+  try:
+    supabase.table("user_lists").update({"progress": progress_val}).eq(
+        "username", st.session_state.username
+    ).eq("list_type", l_type).eq("title", title).execute()
+  except Exception as e:
+    st.error(f"Kayıt hatası: {e}")
 
 
 def remove_from_list(l_type, title):
@@ -614,18 +645,19 @@ with tab_ne_izlesem:
     st.info("👆 Başlamak için yukarıdan lütfen bir Tür seç!")
   else:
     try:
-      # TMDB discover uç noktası genelde en fazla 500 sayfaya izin verir, güvenli aralık seçelim
       rand_page = random.randint(1, 20)
       discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
       disc_response = requests.get(discover_url, timeout=10)
-      
+
       if disc_response.status_code == 200:
         disc_res = disc_response.json().get("results", [])
         if disc_res:
           random.shuffle(disc_res)
           recommendations = disc_res[:10]
 
-          st.success(f"Seçilen türe uygun {len(recommendations)} öneri listelendi:")
+          st.success(
+              f"Seçilen türe uygun {len(recommendations)} öneri listelendi:"
+          )
           friends_list = get_accepted_friends(st.session_state.username)
 
           for idx, item in enumerate(recommendations):
@@ -933,19 +965,23 @@ with tab_yarida:
       if item.get("poster"):
         st.image(item["poster"], width=100)
 
+      current_prog = item.get("progress") or ""
+
       with st.form(key=f"form_half_mov_{item['title']}"):
         progress_val = st.text_input(
             "Kaldığın Anı Yaz (Örn: 1.25.32)",
+            value=current_prog,
             placeholder="1.25.32",
             key=f"input_half_mov_{item['title']}",
         )
         submitted_mov = st.form_submit_button("Güncelle / Kaydet")
         if submitted_mov:
-          if progress_val.strip():
-            st.success(
-                f"**{item['title']}** için kaldığın yer ({progress_val})"
-                " kaydedildi!"
-            )
+          update_progress_in_db("unfinished", item["title"], progress_val)
+          st.success(
+              f"**{item['title']}** için kaldığın yer ({progress_val})"
+              " kaydedildi!"
+          )
+          st.rerun()
 
       c1, c2 = st.columns(2)
       with c1:
@@ -975,19 +1011,23 @@ with tab_yarida:
       if item.get("poster"):
         st.image(item["poster"], width=100)
 
+      current_prog_show = item.get("progress") or ""
+
       with st.form(key=f"form_half_sho_{item['title']}"):
         progress_val_show = st.text_input(
             "Kaldığın Sezon/Bölüm Yaz (Örn: 4.sezon 9.bölüm)",
+            value=current_prog_show,
             placeholder="4.sezon 9.bölüm",
             key=f"input_half_sho_{item['title']}",
         )
         submitted_show = st.form_submit_button("Güncelle / Kaydet")
         if submitted_show:
-          if progress_val_show.strip():
-            st.success(
-                f"**{item['title']}** için kaldığın yer ({progress_val_show})"
-                " kaydedildi!"
-            )
+          update_progress_in_db("unfinished", item["title"], progress_val_show)
+          st.success(
+              f"**{item['title']}** için kaldığın yer ({progress_val_show})"
+              " kaydedildi!"
+          )
+          st.rerun()
 
       c1, c2 = st.columns(2)
       with c1:
