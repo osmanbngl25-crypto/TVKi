@@ -1,7 +1,9 @@
 import random
+from datetime import datetime
 import requests
 from supabase import create_client
 import streamlit as st
+from groq import Groq
 
 st.set_page_config(
     page_title="TVKi",
@@ -23,6 +25,7 @@ st.markdown(
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 TMDB_API_KEY = st.secrets["TMDB_API_KEY"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 
 @st.cache_resource
@@ -345,6 +348,7 @@ st.divider()
     tab_istek,
     tab_arkadas,
     tab_sohbet,
+    tab_kio,
 ) = st.tabs([
     "🏠 Ana Sayfa",
     "✨ Ne İzlemeliyim?",
@@ -357,6 +361,7 @@ st.divider()
     "📩 İstekler",
     "👥 Arkadaşlar",
     "💬 Sohbet",
+    "🤖 KIO AI",
 ])
 
 
@@ -1651,39 +1656,93 @@ with tab_sohbet:
             sender_name = (
                 "Sen"
                 if m["sender"] == st.session_state.username
-                else m["sender"]
+                else f"@{m['sender']}"
             )
-            col_m1, col_m2 = st.columns([10, 2])
-            with col_m1:
-              st.write(f"**{sender_name}:** {m['message']}")
-            with col_m2:
-              if m["sender"] == st.session_state.username:
-                if st.button("Sil", key=f"del_m_{m['id']}"):
-                  supabase.table("chats").delete().eq("id", m["id"]).execute()
-                  st.rerun()
-        else:
-          st.info("Henüz mesaj yok. İlk mesajı sen gönder!")
+            raw_time = m.get("created_at", "")
+            formatted_time = ""
+            if raw_time:
+              try:
+                # ISO formatındaki zamanı okuyup istediğimiz formata çeviriyoruz
+                dt_obj = datetime.fromisoformat(
+                    raw_time.replace("Z", "+00:00")
+                )
+                formatted_time = dt_obj.strftime("%d.%m.%Y %H:%M")
+              except:
+                formatted_time = raw_time[:16].replace("T", " ")
+
+            # Mesajı sol tarafa, saati ise aynı satırda sağa yaslı şekilde gösteriyoruz
+            col_msg, col_time = st.columns([7, 3])
+            with col_msg:
+              st.markdown(f"**{sender_name}:** {m['message']}")
+            with col_time:
+              st.markdown(
+                  f"<div style='text-align: right; color: gray; font-size: 0.85em;'>{formatted_time}</div>",
+                  unsafe_allow_html=True,
+              )
 
       with st.form(key="chat_form", clear_on_submit=True):
-        msg_text = st.text_input(
-            "Mesajını yaz...", placeholder="Bir şeyler yaz..."
-        )
-        col_sub1, col_sub2 = st.columns([6, 1])
-        with col_sub1:
-          submit_btn = st.form_submit_button("Gönder", use_container_width=True)
-        with col_sub2:
-          refresh_btn = st.form_submit_button("🔄", use_container_width=True)
-
-        if submit_btn and msg_text.strip():
+        new_msg = st.text_input("Mesaj yaz...")
+        submitted_chat = st.form_submit_button("Gönder")
+        if submitted_chat and new_msg:
           if supabase:
-            supabase.table("chats").insert({
-                "sender": st.session_state.username,
-                "receiver": chat_partner,
-                "message": msg_text.strip(),
-            }).execute()
-            st.rerun()
-
-        if refresh_btn:
-          st.rerun()
+            try:
+              supabase.table("chats").insert({
+                  "sender": st.session_state.username,
+                  "receiver": chat_partner,
+                  "message": new_msg,
+              }).execute()
+              st.rerun()
+            except Exception as e:
+              st.error(f"Mesaj gönderilemedi: {e}")
   else:
-    st.info("Sohbet etmek için önce biriyle takipleşmelisin.")
+    st.info("Sohbet edebileceğin arkadaşın yok.")
+
+
+# 12. KIO AI ASİSTANI
+with tab_kio:
+  st.title("🤖 KIO - TVKi Yapay Zeka Asistanı")
+  st.write(
+      "Selam! Ben KIO. Film ve dizi tercihlerin konusunda sana yardımcı olmak"
+      " için buradayım."
+  )
+
+  if "kio_messages" not in st.session_state:
+    st.session_state.kio_messages = [{
+        "role": "system",
+        "content": (
+            "Sen TVKi uygulamasının akıllı, samimi ve sinema"
+            " tutkunu yapay zeka asistanı KIO'sun. Kullanıcılara film"
+            " ve dizi önerileri yapıyorsun."
+        ),
+    }]
+
+  for message in st.session_state.kio_messages:
+    if message["role"] != "system":
+      with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+  if prompt := st.chat_input(
+      "KIO'ya bir şeyler sor... (Örn: Bana bilimkurgu film öner!)",
+      key="kio_chat_input",
+  ):
+    st.session_state.kio_messages.append(
+        {"role": "user", "content": prompt}
+    )
+    with st.chat_message("user"):
+      st.markdown(prompt)
+
+    try:
+      client = Groq(api_key=GROQ_API_KEY)
+      response = client.chat.completions.create(
+          model="openai/gpt-oss-120b",
+          messages=st.session_state.kio_messages,
+      )
+      ai_response = response.choices[0].message.content
+    except Exception as e:
+      ai_response = f"Eyvah kanka, bir hata oluştu: {e}"
+
+    st.session_state.kio_messages.append(
+        {"role": "assistant", "content": ai_response}
+    )
+    with st.chat_message("assistant"):
+      st.markdown(ai_response)
