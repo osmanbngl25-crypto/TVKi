@@ -1,3 +1,4 @@
 streamlit
-supabase
+supabase  
 requests
+groq
