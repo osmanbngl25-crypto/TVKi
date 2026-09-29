@@ -1,9 +1,10 @@
-import random
 from datetime import datetime
+import random
+from duckduckgo_search import DDGS
+from groq import Groq
 import requests
 from supabase import create_client
 import streamlit as st
-from groq import Groq
 
 st.set_page_config(
     page_title="TVKi",
@@ -61,7 +62,7 @@ if not st.session_state.logged_in:
   st.write("Sosyal film platformuna hoş geldin!")
 
   if supabase is None:
-    st.error("⚠️ Sunucu bağlantısı kurulamadı.")
+    st.error("⚠ Sunucu bağlantısı kurulamadı.")
 
   secim = st.radio("İşlem Türü:", ["Giriş Yap", "Kayıt Ol"], key="auth_radio")
   k_adi = st.text_input("Kullanıcı Adı").strip()
@@ -700,7 +701,7 @@ with tab_ne_izlesem:
 
             c_w1, c_w2, c_w3, c_w4, c_w5 = st.columns(5)
             with c_w1:
-              if st.button("❤️ Favori", key=f"wiz_f_{idx}"):
+              if st.button("❤️️ Favori", key=f"wiz_f_{idx}"):
                 add_to_list("favorites", m_data)
                 st.success("Favorilere eklendi!")
                 st.rerun()
@@ -832,7 +833,7 @@ with tab_fav:
 
 # 4. İZLEYECEKLERİM
 with tab_watch:
-  st.title("İzleyecekler Listen")
+  st.title("İzleyecek Listen")
   items = get_user_lists(st.session_state.username, "watchlist")
   friends_list = get_accepted_friends(st.session_state.username)
 
@@ -1387,7 +1388,7 @@ with tab_arkadas:
       else:
         st.write("Boş.")
 
-      st.write("❤️ **Favori Oyuncuları:**")
+      st.write("❤ **Favori Oyuncuları:**")
       if f_fav_actors:
         for it in f_fav_actors:
           st.write(f"**{it['title']}**")
@@ -1662,7 +1663,6 @@ with tab_sohbet:
             formatted_time = ""
             if raw_time:
               try:
-                # ISO formatındaki zamanı okuyup istediğimiz formata çeviriyoruz
                 dt_obj = datetime.fromisoformat(
                     raw_time.replace("Z", "+00:00")
                 )
@@ -1670,7 +1670,6 @@ with tab_sohbet:
               except:
                 formatted_time = raw_time[:16].replace("T", " ")
 
-            # Mesajı sol tarafa, saati ise aynı satırda sağa yaslı şekilde gösteriyoruz
             col_msg, col_time = st.columns([7, 3])
             with col_msg:
               st.markdown(f"**{sender_name}:** {m['message']}")
@@ -1702,40 +1701,60 @@ with tab_sohbet:
 with tab_kio:
   st.title("🤖 KIO - TVKi Yapay Zeka Asistanı")
   st.write(
-      "Selam! Ben KIO. Film ve dizi tercihlerin konusunda sana yardımcı olmak"
-      " için buradayım."
+      "Selam! Ben KIO. Film, dizi ve genel konularda seninle sohbet etmek için"
+      " buradayım."
+  )
+
+  system_prompt = (
+      "Sen TVKi uygulamasının akıllı ve samimi yapay zeka asistanı KIO'sun."
+      " Kullanıcıyla normal sohbetler edebilir, selamlaşabilirsin."
+      " Eğer kullanıcı bir film, dizi veya güncel bir yapım hakkında soru sorarsa,"
+      " sana sağlanan arama sonuçlarını kullanarak en güncel ve net bilgileri aktar."
   )
 
   if "kio_messages" not in st.session_state:
-    st.session_state.kio_messages = [{
-        "role": "system",
-        "content": (
-            "Sen TVKi uygulamasının akıllı, samimi ve sinema"
-            " tutkunu yapay zeka asistanı KIO'sun. Kullanıcılara film"
-            " ve dizi önerileri yapıyorsun."
-        ),
-    }]
+    st.session_state.kio_messages = []
 
+  # Önce geçmiş mesajları ekranda gösterelim
   for message in st.session_state.kio_messages:
     if message["role"] != "system":
       with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+  # Yeni girdi alma kısmı
   if prompt := st.chat_input(
-      "KIO'ya bir şeyler sor... (Örn: Bana bilimkurgu film öner!)",
+      "KIO'ya bir şeyler yaz veya film sor...",
       key="kio_chat_input",
   ):
-    st.session_state.kio_messages.append(
-        {"role": "user", "content": prompt}
-    )
+    st.session_state.kio_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
       st.markdown(prompt)
+
+    search_context = ""
+    try:
+      with DDGS() as ddgs:
+        results = list(ddgs.text(prompt, max_results=3))
+        if results:
+          search_context = "\n\nGüncel Web Arama Sonuçları:\n"
+          for r in results:
+            search_context += f"- {r.get('title')}: {r.get('body')}\n"
+    except Exception as search_err:
+      search_context = ""
+
+    # Modele gönderilecek mesaj listesini doğru sırada oluşturuyoruz
+    current_messages = [{"role": "system", "content": system_prompt}] + [
+        m for m in st.session_state.kio_messages if m["role"] != "system"
+    ]
+
+    # Eğer arama sonucu varsa, son kullanıcı mesajına ekliyoruz
+    if search_context:
+      current_messages[-1]["content"] = prompt + search_context
 
     try:
       client = Groq(api_key=GROQ_API_KEY)
       response = client.chat.completions.create(
           model="openai/gpt-oss-120b",
-          messages=st.session_state.kio_messages,
+          messages=current_messages,
       )
       ai_response = response.choices[0].message.content
     except Exception as e:
