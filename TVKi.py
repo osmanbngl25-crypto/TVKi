@@ -46,6 +46,14 @@ if "username" not in st.session_state:
 if "search_query_override" not in st.session_state:
   st.session_state.search_query_override = ""
 
+# Ne İzlemeliyim için cache / oturum bazlı liste tutucu
+if "wiz_results_cache" not in st.session_state:
+  st.session_state.wiz_results_cache = []
+if "wiz_last_genre" not in st.session_state:
+  st.session_state.wiz_last_genre = None
+if "wiz_last_type" not in st.session_state:
+  st.session_state.wiz_last_type = None
+
 if "username" in st.query_params and not st.session_state.logged_in:
   st.session_state.logged_in = True
   st.session_state.username = st.query_params["username"]
@@ -247,6 +255,30 @@ def get_actor_filmography(actor_id):
     return valid_media
   except:
     return []
+
+
+def get_media_trailer(media_id, tmdb_type):
+  try:
+    url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/videos?api_key={TMDB_API_KEY}&language=tr-TR"
+    res = requests.get(url, timeout=10).json().get("results", [])
+    for vid in res:
+      if vid.get("site") == "YouTube" and vid.get("type") in [
+          "Trailer",
+          "Teaser",
+      ]:
+        return f"https://www.youtube.com/watch?v={vid.get('key')}"
+
+    url_en = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/videos?api_key={TMDB_API_KEY}&language=en-US"
+    res_en = requests.get(url_en, timeout=10).json().get("results", [])
+    for vid in res_en:
+      if vid.get("site") == "YouTube" and vid.get("type") in [
+          "Trailer",
+          "Teaser",
+      ]:
+        return f"https://www.youtube.com/watch?v={vid.get('key')}"
+  except:
+    pass
+  return None
 
 
 def add_to_list(l_type, m_data):
@@ -488,11 +520,23 @@ with tab_ana:
         st.error(f"Oyuncu araması yapılırken bağlantı kurulamadı: {e}")
   else:
     tmdb_type = "movie" if media_type == "Film" else "tv"
-    search_query = st.text_input(
+    
+    # Arama sorgusu değiştiğinde önceki açık kalan fragman state'lerini temizle
+    last_search_key = f"last_query_{tmdb_type}"
+    current_search_input = st.text_input(
         "🔍 Film veya dizi adı arat...",
         placeholder="Örn: Interstellar, Spider-Man...",
         key="ana_search",
     )
+    
+    if st.session_state.get(last_search_key) != current_search_input:
+      st.session_state[last_search_key] = current_search_input
+      # Önceki aramadan kalan fragman/oyuncu açık kalma durumlarını temizle
+      for k in list(st.session_state.keys()):
+        if k.startswith("show_trailer_") or k.startswith("show_cast_"):
+          st.session_state[k] = False
+
+    search_query = current_search_input
 
     if search_query:
       try:
@@ -533,7 +577,7 @@ with tab_ana:
                 "poster": poster_url,
             }
 
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
             with col1:
               if st.button("❤️ Favori", key=f"f_{index}"):
                 add_to_list("favorites", m_data)
@@ -572,6 +616,19 @@ with tab_ana:
                 st.session_state[f"show_cast_{index}"] = not st.session_state.get(
                     f"show_cast_{index}", False
                 )
+            with col7:
+              if st.button("🎬 Fragman", key=f"trailer_btn_{index}"):
+                st.session_state[f"show_trailer_{index}"] = not st.session_state.get(
+                    f"show_trailer_{index}", False
+                )
+
+            # Fragmanı TVKi içinde açma alanı (st.video ile)
+            if st.session_state.get(f"show_trailer_{index}", False):
+              trailer_url = get_media_trailer(media_id, tmdb_type)
+              if trailer_url:
+                st.video(trailer_url)
+              else:
+                st.info("Bu yapım için fragman bulunamadı.")
 
             if st.session_state.get(f"show_cast_{index}", False):
               st.markdown("#### Tüm Oyuncular")
@@ -604,8 +661,8 @@ with tab_ana:
 with tab_ne_izlesem:
   st.title("✨ Ne İzlemeliyim?")
   st.write(
-      "Kararsız mı kaldın? İçerik türünü ve istediğin türü seç, sana rastgele"
-      " 10 harika öneri getirelim!"
+      "Kararsız mı kaldın? İçerik türünü ve istediğin türü seç, sana harika"
+      " öneriler getirelim!"
   )
 
   col_wizard1, col_wizard2, col_wizard3 = st.columns([3, 4, 3])
@@ -647,98 +704,125 @@ with tab_ne_izlesem:
         key="btn_wiz_refresh",
     )
 
+  # Tür veya içerik türü değiştiğinde ya da yenile butonuna basıldığında cache'i güncelle
+  if (
+      st.session_state.wiz_last_genre != selected_genre_name
+      or st.session_state.wiz_last_type != wiz_type
+      or refresh_wizard
+  ):
+    st.session_state.wiz_last_genre = selected_genre_name
+    st.session_state.wiz_last_type = wiz_type
+    st.session_state.wiz_results_cache = []
+
+    # Fragman açık kalma durumlarını temizle
+    for k in list(st.session_state.keys()):
+      if k.startswith("wiz_show_trailer_"):
+        st.session_state[k] = False
+
+    if selected_genre_id:
+      try:
+        rand_page = random.randint(1, 10)
+        discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
+        disc_response = requests.get(discover_url, timeout=10)
+
+        if disc_response.status_code == 200:
+          disc_res = disc_response.json().get("results", [])
+          if disc_res:
+            random.shuffle(disc_res)
+            st.session_state.wiz_results_cache = disc_res[:10]
+      except Exception:
+        pass
+
   if not selected_genre_id:
     st.info("👆 Başlamak için yukarıdan lütfen bir Tür seç!")
   else:
-    try:
-      rand_page = random.randint(1, 20)
-      discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
-      disc_response = requests.get(discover_url, timeout=10)
+    recommendations = st.session_state.wiz_results_cache
+    if recommendations:
+      st.success(
+          f"Seçilen türe uygun {len(recommendations)} öneri listeleniyor:"
+      )
+      friends_list = get_accepted_friends(st.session_state.username)
 
-      if disc_response.status_code == 200:
-        disc_res = disc_response.json().get("results", [])
-        if disc_res:
-          random.shuffle(disc_res)
-          recommendations = disc_res[:10]
+      for idx, item in enumerate(recommendations):
+        media_id = item.get("id")
+        title = (
+            item.get("title") if tmdb_t_type == "movie" else item.get("name")
+        )
+        overview = item.get("overview")
+        poster_path = item.get("poster_path")
+        date_str = (
+            item.get("release_date", "Bilinmiyor")
+            if tmdb_t_type == "movie"
+            else item.get("first_air_date", "Bilinmiyor")
+        )
+        year = f" ({date_str[:4]})" if len(date_str) >= 4 else ""
+        full_media_title = f"{title}{year}"
 
-          st.success(
-              f"Seçilen türe uygun {len(recommendations)} öneri listelendi:"
-          )
-          friends_list = get_accepted_friends(st.session_state.username)
+        st.subheader(full_media_title)
+        poster_url = (
+            f"https://image.tmdb.org/t/p/w500{poster_path}"
+            if poster_path
+            else None
+        )
+        if poster_url:
+          st.image(poster_url, width=150)
 
-          for idx, item in enumerate(recommendations):
-            title = (
-                item.get("title")
-                if tmdb_t_type == "movie"
-                else item.get("name")
+        st.write(overview if overview else "Özet bulunmuyor.")
+
+        m_data = {
+            "title": full_media_title,
+            "media_type": wiz_type,
+            "poster": poster_url,
+        }
+
+        c_w1, c_w2, c_w3, c_w4, c_w5, c_w6 = st.columns(6)
+        with c_w1:
+          if st.button("❤ Favori", key=f"wiz_f_{idx}"):
+            add_to_list("favorites", m_data)
+            st.success("Favorilere eklendi!")
+            st.rerun()
+        with c_w2:
+          if st.button("📌 İzle", key=f"wiz_w_{idx}"):
+            add_to_list("watchlist", m_data)
+            st.success("İzleneceklere eklendi!")
+            st.rerun()
+        with c_w3:
+          if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
+            add_to_list("watched", m_data)
+            st.success("İzlenenlere eklendi!")
+            st.rerun()
+        with c_w4:
+          if st.button("⏳ Yarıda", key=f"wiz_half_{idx}"):
+            add_to_list("unfinished", m_data)
+            st.success("Yarıda kalanlara eklendi!")
+            st.rerun()
+        with c_w5:
+          with st.popover("📤 Paylaş", use_container_width=True):
+            st.write("Kime gönderilsin?")
+            if friends_list:
+              target_f = st.selectbox(
+                  "Arkadaş", friends_list, key=f"wiz_share_{idx}"
+              )
+              if st.button("Sohbete Gönder", key=f"wiz_share_btn_{idx}"):
+                send_media_to_chat(target_f, full_media_title, wiz_type)
+            else:
+              st.warning("Henüz arkadaşın yok.")
+        with c_w6:
+          if st.button("🎬 Fragman", key=f"wiz_trailer_btn_{idx}"):
+            st.session_state[f"wiz_show_trailer_{idx}"] = not st.session_state.get(
+                f"wiz_show_trailer_{idx}", False
             )
-            overview = item.get("overview")
-            poster_path = item.get("poster_path")
-            date_str = (
-                item.get("release_date", "Bilinmiyor")
-                if tmdb_t_type == "movie"
-                else item.get("first_air_date", "Bilinmiyor")
-            )
-            year = f" ({date_str[:4]})" if len(date_str) >= 4 else ""
-            full_media_title = f"{title}{year}"
 
-            st.subheader(full_media_title)
-            poster_url = (
-                f"https://image.tmdb.org/t/p/w500{poster_path}"
-                if poster_path
-                else None
-            )
-            if poster_url:
-              st.image(poster_url, width=150)
+        if st.session_state.get(f"wiz_show_trailer_{idx}", False):
+          trailer_url = get_media_trailer(media_id, tmdb_t_type)
+          if trailer_url:
+            st.video(trailer_url)
+          else:
+            st.info("Bu yapım için fragman bulunamadı.")
 
-            st.write(overview if overview else "Özet bulunmuyor.")
-
-            m_data = {
-                "title": full_media_title,
-                "media_type": wiz_type,
-                "poster": poster_url,
-            }
-
-            c_w1, c_w2, c_w3, c_w4, c_w5 = st.columns(5)
-            with c_w1:
-              if st.button("❤️️ Favori", key=f"wiz_f_{idx}"):
-                add_to_list("favorites", m_data)
-                st.success("Favorilere eklendi!")
-                st.rerun()
-            with c_w2:
-              if st.button("📌 İzle", key=f"wiz_w_{idx}"):
-                add_to_list("watchlist", m_data)
-                st.success("İzleneceklere eklendi!")
-                st.rerun()
-            with c_w3:
-              if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
-                add_to_list("watched", m_data)
-                st.success("İzlenenlere eklendi!")
-                st.rerun()
-            with c_w4:
-              if st.button("⏳ Yarıda", key=f"wiz_half_{idx}"):
-                add_to_list("unfinished", m_data)
-                st.success("Yarıda kalanlara eklendi!")
-                st.rerun()
-            with c_w5:
-              with st.popover("📤 Paylaş", use_container_width=True):
-                st.write("Kime gönderilsin?")
-                if friends_list:
-                  target_f = st.selectbox(
-                      "Arkadaş", friends_list, key=f"wiz_share_{idx}"
-                  )
-                  if st.button("Sohbete Gönder", key=f"wiz_share_btn_{idx}"):
-                    send_media_to_chat(target_f, full_media_title, wiz_type)
-                else:
-                  st.warning("Henüz arkadaşın yok.")
-
-            st.divider()
-        else:
-          st.warning("Bu türde gösterilecek içerik bulunamadı.")
-      else:
-        st.warning("API üzerinden veri çekilemedi, lütfen tekrar deneyin.")
-    except Exception as e:
-      st.error(f"Öneriler getirilirken hata oluştu: {e}")
+        st.divider()
+    else:
+      st.warning("Bu türde gösterilecek içerik bulunamadı.")
 
 
 # 3. FAVORİLERİM
@@ -1340,7 +1424,7 @@ with tab_arkadas:
       else:
         st.write("Boş.")
 
-      st.write("❤️ **Favori Dizileri:**")
+      st.write("❤️️ **Favori Dizileri:**")
       if f_fav_shows:
         for it in f_fav_shows:
           st.write(f"**{it['title']}**")
@@ -1433,7 +1517,7 @@ with tab_arkadas:
           b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
           with b1:
             if st.button(
-                "❤️ Favori", key=f"fw_m_fav_{selected_friend}_{it['title']}"
+                "❤ Favori", key=f"fw_m_fav_{selected_friend}_{it['title']}"
             ):
               add_to_list("favorites", it)
               st.success("Favorilere eklendi!")
@@ -1530,7 +1614,7 @@ with tab_arkadas:
           b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
           with b1:
             if st.button(
-                "❤️ Favori", key=f"fwd_m_fav_{selected_friend}_{it['title']}"
+                "❤ Favori", key=f"fwd_m_fav_{selected_friend}_{it['title']}"
             ):
               add_to_list("favorites", it)
               st.success("Favorilere eklendi!")
@@ -1715,13 +1799,11 @@ with tab_kio:
   if "kio_messages" not in st.session_state:
     st.session_state.kio_messages = []
 
-  # Önce geçmiş mesajları ekranda gösterelim
   for message in st.session_state.kio_messages:
     if message["role"] != "system":
       with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-  # Yeni girdi alma kısmı
   if prompt := st.chat_input(
       "KIO'ya bir şeyler yaz veya film sor...",
       key="kio_chat_input",
@@ -1741,12 +1823,10 @@ with tab_kio:
     except Exception as search_err:
       search_context = ""
 
-    # Modele gönderilecek mesaj listesini doğru sırada oluşturuyoruz
     current_messages = [{"role": "system", "content": system_prompt}] + [
         m for m in st.session_state.kio_messages if m["role"] != "system"
     ]
 
-    # Eğer arama sonucu varsa, son kullanıcı mesajına ekliyoruz
     if search_context:
       current_messages[-1]["content"] = prompt + search_context
 
