@@ -2,4 +2,4 @@ streamlit
 supabase  
 requests
 groq
-duckduckgo_search
+ddgs

@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import random
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from groq import Groq
 import requests
 from supabase import create_client
 import streamlit as st
+from openai import OpenAI
 
 st.set_page_config(
     page_title="TVKi",
@@ -520,18 +521,16 @@ with tab_ana:
         st.error(f"Oyuncu araması yapılırken bağlantı kurulamadı: {e}")
   else:
     tmdb_type = "movie" if media_type == "Film" else "tv"
-    
-    # Arama sorgusu değiştiğinde önceki açık kalan fragman state'lerini temizle
+
     last_search_key = f"last_query_{tmdb_type}"
     current_search_input = st.text_input(
         "🔍 Film veya dizi adı arat...",
         placeholder="Örn: Interstellar, Spider-Man...",
         key="ana_search",
     )
-    
+
     if st.session_state.get(last_search_key) != current_search_input:
       st.session_state[last_search_key] = current_search_input
-      # Önceki aramadan kalan fragman/oyuncu açık kalma durumlarını temizle
       for k in list(st.session_state.keys()):
         if k.startswith("show_trailer_") or k.startswith("show_cast_"):
           st.session_state[k] = False
@@ -622,7 +621,6 @@ with tab_ana:
                     f"show_trailer_{index}", False
                 )
 
-            # Fragmanı TVKi içinde açma alanı (st.video ile)
             if st.session_state.get(f"show_trailer_{index}", False):
               trailer_url = get_media_trailer(media_id, tmdb_type)
               if trailer_url:
@@ -704,7 +702,6 @@ with tab_ne_izlesem:
         key="btn_wiz_refresh",
     )
 
-  # Tür veya içerik türü değiştiğinde ya da yenile butonuna basıldığında cache'i güncelle
   if (
       st.session_state.wiz_last_genre != selected_genre_name
       or st.session_state.wiz_last_type != wiz_type
@@ -714,7 +711,6 @@ with tab_ne_izlesem:
     st.session_state.wiz_last_type = wiz_type
     st.session_state.wiz_results_cache = []
 
-    # Fragman açık kalma durumlarını temizle
     for k in list(st.session_state.keys()):
       if k.startswith("wiz_show_trailer_"):
         st.session_state[k] = False
@@ -1424,7 +1420,7 @@ with tab_arkadas:
       else:
         st.write("Boş.")
 
-      st.write("❤️️ **Favori Dizileri:**")
+      st.write("❤ **Favori Dizileri:**")
       if f_fav_shows:
         for it in f_fav_shows:
           st.write(f"**{it['title']}**")
@@ -1747,9 +1743,9 @@ with tab_sohbet:
             formatted_time = ""
             if raw_time:
               try:
-                dt_obj = datetime.fromisoformat(
-                    raw_time.replace("Z", "+00:00")
-                )
+                # Z harfini temizleyip nesneye çeviriyoruz ve üstüne net +3 saat ekliyoruz:
+                clean_time = raw_time.replace("Z", "").split("+")[0]
+                dt_obj = datetime.fromisoformat(clean_time) + timedelta(hours=3)
                 formatted_time = dt_obj.strftime("%d.%m.%Y %H:%M")
               except:
                 formatted_time = raw_time[:16].replace("T", " ")
@@ -1781,67 +1777,80 @@ with tab_sohbet:
     st.info("Sohbet edebileceğin arkadaşın yok.")
 
 
-# 12. KIO AI ASİSTANI
+# --- 12. KIO AI ---
 with tab_kio:
-  st.title("🤖 KIO - TVKi Yapay Zeka Asistanı")
+  st.title("🤖 KIO AI Asistan")
   st.write(
-      "Selam! Ben KIO. Film, dizi ve genel konularda seninle sohbet etmek için"
-      " buradayım."
-  )
-
-  system_prompt = (
-      "Sen TVKi uygulamasının akıllı ve samimi yapay zeka asistanı KIO'sun."
-      " Kullanıcıyla normal sohbetler edebilir, selamlaşabilirsin."
-      " Eğer kullanıcı bir film, dizi veya güncel bir yapım hakkında soru sorarsa,"
-      " sana sağlanan arama sonuçlarını kullanarak en güncel ve net bilgileri aktar."
+      "Film ve diziler hakkında her şeyi sorabilir, güncel yapımlar hakkında"
+      " bilgi alabilirsin!"
   )
 
   if "kio_messages" not in st.session_state:
-    st.session_state.kio_messages = []
+    st.session_state.kio_messages = [{
+        "role": "assistant",
+        "content": (
+            "Merhaba! Ben KIO. Film, dizi ve sinema dünyası hakkında ne"
+            " istersen sorabilirsin."
+        ),
+    }]
 
-  for message in st.session_state.kio_messages:
-    if message["role"] != "system":
-      with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+  for msg in st.session_state.kio_messages:
+    with st.chat_message(msg["role"]):
+      st.markdown(msg["content"])
 
-  if prompt := st.chat_input(
-      "KIO'ya bir şeyler yaz veya film sor...",
-      key="kio_chat_input",
-  ):
+  if prompt := st.chat_input("KIO'ya bir şeyler sor..."):
     st.session_state.kio_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
       st.markdown(prompt)
 
-    search_context = ""
-    try:
-      with DDGS() as ddgs:
-        results = list(ddgs.text(prompt, max_results=3))
-        if results:
-          search_context = "\n\nGüncel Web Arama Sonuçları:\n"
-          for r in results:
-            search_context += f"- {r.get('title')}: {r.get('body')}\n"
-    except Exception as search_err:
-      search_context = ""
-
-    current_messages = [{"role": "system", "content": system_prompt}] + [
-        m for m in st.session_state.kio_messages if m["role"] != "system"
-    ]
-
-    if search_context:
-      current_messages[-1]["content"] = prompt + search_context
-
-    try:
-      client = Groq(api_key=GROQ_API_KEY)
-      response = client.chat.completions.create(
-          model="openai/gpt-oss-120b",
-          messages=current_messages,
-      )
-      ai_response = response.choices[0].message.content
-    except Exception as e:
-      ai_response = f"Eyvah kanka, bir hata oluştu: {e}"
-
-    st.session_state.kio_messages.append(
-        {"role": "assistant", "content": ai_response}
-    )
     with st.chat_message("assistant"):
-      st.markdown(ai_response)
+      with st.spinner("Güncel veriler taranıyor..."):
+        # DuckDuckGo ile güncel web araması
+        search_results_text = ""
+        try:
+          with DDGS() as ddgs:
+            results = [r for r in ddgs.text(prompt, max_results=5)]
+            if results:
+              search_results_text = (
+                  "\n\nİNTERNETTEN BULUNAN GÜNCEL BİLGİLER (ÖNCELİKLİ KULLAN):"
+              )
+              for r in results:
+                search_results_text += (
+                    f"\n- Başlık: {r.get('title')}\n  İçerik:"
+                    f" {r.get('body')}\n  Kaynak: {r.get('href')}"
+                )
+        except Exception as e:
+          search_results_text = ""
+
+        # Groq altyapısını kullanan OpenAI istemcisi ile yanıt üretme
+        try:
+          client = OpenAI(
+              api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1"
+          )
+          system_prompt = (
+              "Ben TVKi platformunun yapay zeka asistanı KIO. Film, dizi"
+              " ve sinema konularında uzmansın.\n"
+              "Kullanıcının sorusunu yanıtlarken AŞAĞIDAKİ GÜNCEL BİLGİLERİ"
+              " mutlaka baz al. Eğer güncel bilgiler verilmişse, eski"
+              " bilgilerini bir kenara bırakıp bu güncel verilere göre net ve"
+              " doğru cevap ver."
+              f"{search_results_text}"
+          )
+
+          messages = [{"role": "system", "content": system_prompt}]
+          for m in st.session_state.kio_messages:
+            messages.append({"role": m["role"], "content": m["content"]})
+
+          completion = client.chat.completions.create(
+              model="openai/gpt-oss-120b",
+              messages=messages,
+              temperature=0.3,  # Daha odaklı ve net sonuç için sıcaklığı biraz düşürdük
+          )
+          response_text = completion.choices[0].message.content
+        except Exception as e:
+          response_text = f"Bağlantı sırasında bir hata oluştu: {e}"
+
+        st.markdown(response_text)
+        st.session_state.kio_messages.append(
+            {"role": "assistant", "content": response_text}
+        )
