@@ -55,9 +55,22 @@ if "wiz_last_genre" not in st.session_state:
 if "wiz_last_type" not in st.session_state:
   st.session_state.wiz_last_type = None
 
+# Tarayıcı Hafızasından Oturum Kurtarma (Kalıcı Giriş Ekstresi)
 if "username" in st.query_params and not st.session_state.logged_in:
-  st.session_state.logged_in = True
-  st.session_state.username = st.query_params["username"]
+  saved_uname = st.query_params["username"]
+  if supabase:
+    try:
+      chk_user = (
+          supabase.table("users")
+          .select("*")
+          .eq("username", saved_uname)
+          .execute()
+      )
+      if chk_user.data:
+        st.session_state.logged_in = True
+        st.session_state.username = saved_uname
+    except:
+      pass
 
 if st.session_state.logged_in:
   st.query_params["username"] = st.session_state.username
