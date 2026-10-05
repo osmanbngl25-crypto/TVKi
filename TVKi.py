@@ -7,6 +7,31 @@ from supabase import create_client
 import streamlit as st
 from openai import OpenAI
 
+st.markdown(
+    """
+    <style>
+    .stApp { background-color: #121212; color: #e0e0e0; }
+    h1, h2, h3 { color: #ffffff !important; }
+    
+    /* iOS PWA klavye ve odaklanma sorunu için düzeltme */
+    .stTextInput input, .stTextArea textarea { 
+        background-color: #1e1e1e !important; 
+        color: white !important; 
+        border-radius: 8px !important;
+        font-size: 16px !important; /* iOS'in zoom yapıp klavyeyi kilitlemesini engeller */
+    }
+    
+    /* PWA modunda sayfa kaydırma ve yükseklik sabitleme */
+    html, body, [data-testid="stAppViewContainer"] {
+        height: 100%;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 st.set_page_config(
     page_title="TVKi",
     page_icon="logo.png",
