@@ -7,6 +7,32 @@ from supabase import create_client
 import streamlit as st
 from openai import OpenAI
 
+current_user_profile_temp = None
+SUPABASE_URL_temp = st.secrets.get("SUPABASE_URL")
+SUPABASE_KEY_temp = st.secrets.get("SUPABASE_KEY")
+if SUPABASE_URL_temp and SUPABASE_KEY_temp:
+  try:
+    temp_sb = create_client(SUPABASE_URL_temp, SUPABASE_KEY_temp)
+    if "username" in st.query_params:
+      res_p = (
+          temp_sb.table("users")
+          .select("avatar_url")
+          .eq("username", st.query_params["username"])
+          .execute()
+      )
+      if res_p.data:
+        current_user_profile_temp = res_p.data[0].get("avatar_url")
+  except:
+    pass
+
+p_icon = current_user_profile_temp if current_user_profile_temp else "logo.png"
+
+st.set_page_config(
+    page_title="TVKi",
+    page_icon=p_icon,
+    layout="wide",
+)
+
 st.markdown(
     """
     <style>
@@ -18,7 +44,7 @@ st.markdown(
         background-color: #1e1e1e !important; 
         color: white !important; 
         border-radius: 8px !important;
-        font-size: 16px !important; /* iOS'in zoom yapıp klavyeyi kilitlemesini engeller */
+        font-size: 16px !important; 
     }
     
     /* PWA modunda sayfa kaydırma ve yükseklik sabitleme */
@@ -27,23 +53,6 @@ st.markdown(
         overflow: auto;
         -webkit-overflow-scrolling: touch;
     }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
-
-st.set_page_config(
-    page_title="TVKi",
-    page_icon="logo.png",
-    layout="wide",
-)
-
-st.markdown(
-    """
-    <style>
-    .stApp { background-color: #121212; color: #e0e0e0; }
-    h1, h2, h3 { color: #ffffff !important; }
-    .stTextInput input { background-color: #1e1e1e; color: white; border-radius: 8px; }
     </style>
 """,
     unsafe_allow_html=True,
@@ -387,12 +396,12 @@ top_col1, top_col2 = st.columns([8, 2])
 with top_col1:
   cols_h = st.columns([1, 10])
   with cols_h[0]:
-    try:
-      st.image("logo.png", width=45)
-    except:
-      if c_avatar:
-        st.image(c_avatar, width=45)
-      else:
+    if c_avatar:
+      st.image(c_avatar, width=45)
+    else:
+      try:
+        st.image("logo.png", width=45)
+      except:
         st.markdown("🎬")
   with cols_h[1]:
     st.markdown(f"### {c_name} (@{st.session_state.username}) | TVKi")
@@ -1398,6 +1407,7 @@ with tab_arkadas:
       f_favs = get_user_lists(selected_friend, "favorites")
       f_watch = get_user_lists(selected_friend, "watchlist")
       f_watched = get_user_lists(selected_friend, "watched")
+      f_unfinished = get_user_lists(selected_friend, "unfinished")
 
       f_fav_movies = [i for i in f_favs if i["media_type"] == "Film"]
       f_fav_shows = [i for i in f_favs if i["media_type"] == "Dizi"]
@@ -1409,141 +1419,16 @@ with tab_arkadas:
       f_wd_movies = [i for i in f_watched if i["media_type"] == "Film"]
       f_wd_shows = [i for i in f_watched if i["media_type"] == "Dizi"]
 
-      st.markdown("---")
-      st.write("❤️ **Favori Filmleri:**")
-      if f_fav_movies:
-        for it in f_fav_movies:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
-
-          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-          with b1:
-            if st.button(
-                "❤️ Favori", key=f"ff_m_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            if st.button(
-                "📌 İzle", key=f"ff_m_wat_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watchlist", it)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with b3:
-            if st.button(
-                "✅ İzledim", key=f"ff_m_wed_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watched", it)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with b4:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"ff_mov_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_ff_mov_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Film")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
-
-      st.write("❤ **Favori Dizileri:**")
-      if f_fav_shows:
-        for it in f_fav_shows:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
-
-          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-          with b1:
-            if st.button(
-                "❤️ Favori", key=f"ff_s_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            if st.button(
-                "📌 İzle", key=f"ff_s_wat_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watchlist", it)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with b3:
-            if st.button(
-                "✅ İzledim", key=f"ff_s_wed_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watched", it)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with b4:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"ff_sho_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_ff_sho_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Dizi")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
-
-      st.write("❤ **Favori Oyuncuları:**")
-      if f_fav_actors:
-        for it in f_fav_actors:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
-
-          b1, b2 = st.columns([1, 3])
-          with b1:
-            if st.button(
-                "❤️ Favori", key=f"ff_a_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"ff_act_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_ff_act_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Oyuncu")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
+      f_half_movies = [i for i in f_unfinished if i["media_type"] == "Film"]
+      f_half_shows = [i for i in f_unfinished if i["media_type"] == "Dizi"]
 
       st.markdown("---")
-      st.write("📌 **İzleyeceği Filmler:**")
-      if f_w_movies:
-        for it in f_w_movies:
+
+      def render_media_list(items_sub, list_label_prefix):
+        if not items_sub:
+          st.info("Bu liste boş.")
+          return
+        for it in items_sub:
           st.write(f"**{it['title']}**")
           if it.get("poster"):
             st.image(it["poster"], width=80)
@@ -1551,21 +1436,24 @@ with tab_arkadas:
           b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
           with b1:
             if st.button(
-                "❤ Favori", key=f"fw_m_fav_{selected_friend}_{it['title']}"
+                "❤️ Favori",
+                key=f"ff_fav_{selected_friend}_{list_label_prefix}_{it['title']}",
             ):
               add_to_list("favorites", it)
               st.success("Favorilere eklendi!")
               st.rerun()
           with b2:
             if st.button(
-                "📌 İzle", key=f"fw_m_wat_{selected_friend}_{it['title']}"
+                "📌 İzle",
+                key=f"ff_wat_{selected_friend}_{list_label_prefix}_{it['title']}",
             ):
               add_to_list("watchlist", it)
               st.success("İzleneceklere eklendi!")
               st.rerun()
           with b3:
             if st.button(
-                "✅ İzledim", key=f"fw_m_wed_{selected_friend}_{it['title']}"
+                "✅ İzledim",
+                key=f"ff_wed_{selected_friend}_{list_label_prefix}_{it['title']}",
             ):
               add_to_list("watched", it)
               st.success("İzlenenlere eklendi!")
@@ -1577,162 +1465,80 @@ with tab_arkadas:
                 tf = st.selectbox(
                     "Arkadaş",
                     friends,
-                    key=f"fw_mov_{selected_friend}_{it['title']}",
+                    key=f"ff_sh_{selected_friend}_{list_label_prefix}_{it['title']}",
                 )
                 if st.button(
-                    "Gönder", key=f"btn_fw_mov_{selected_friend}_{it['title']}"
+                    "Gönder",
+                    key=f"btn_ff_sh_{selected_friend}_{list_label_prefix}_{it['title']}",
                 ):
-                  send_media_to_chat(tf, it["title"], "Film")
+                  send_media_to_chat(
+                      tf,
+                      it["title"],
+                      it.get("media_type", "Film"),
+                  )
               else:
                 st.warning("Arkadaşın yok.")
           st.divider()
-      else:
-        st.write("Boş.")
 
-      st.write("📌 **İzleyeceği Diziler:**")
-      if f_w_shows:
-        for it in f_w_shows:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
+      with st.expander("❤️ Favori Filmleri"):
+        render_media_list(f_fav_movies, "fav_mov")
 
-          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-          with b1:
-            if st.button(
-                "❤️ Favori", key=f"fw_s_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            if st.button(
-                "📌 İzle", key=f"fw_s_wat_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watchlist", it)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with b3:
-            if st.button(
-                "✅ İzledim", key=f"fw_s_wed_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watched", it)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with b4:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"fw_sho_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_fw_sho_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Dizi")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
+      with st.expander("❤️ Favori Dizileri"):
+        render_media_list(f_fav_shows, "fav_sho")
 
-      st.markdown("---")
-      st.write("✅ **İzlediği Filmler:**")
-      if f_wd_movies:
-        for it in f_wd_movies:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
+      with st.expander("❤️ Favori Oyuncuları"):
+        if f_fav_actors:
+          for it in f_fav_actors:
+            st.write(f"**{it['title']}**")
+            if it.get("poster"):
+              st.image(it["poster"], width=80)
+            b1, b2 = st.columns([1, 3])
+            with b1:
+              if st.button(
+                  "❤️ Favori",
+                  key=f"ff_a_fav_{selected_friend}_{it['title']}",
+              ):
+                add_to_list("favorites", it)
+                st.success("Favorilere eklendi!")
+                st.rerun()
+            with b2:
+              with st.popover("📤 Paylaş"):
+                st.write("Kime gönderilsin?")
+                if friends:
+                  tf = st.selectbox(
+                      "Arkadaş",
+                      friends,
+                      key=f"ff_act_{selected_friend}_{it['title']}",
+                  )
+                  if st.button(
+                      "Gönder",
+                      key=f"btn_ff_act_{selected_friend}_{it['title']}",
+                  ):
+                    send_media_to_chat(tf, it["title"], "Oyuncu")
+                else:
+                  st.warning("Arkadaşın yok.")
+            st.divider()
+        else:
+          st.info("Bu liste boş.")
 
-          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-          with b1:
-            if st.button(
-                "❤ Favori", key=f"fwd_m_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            if st.button(
-                "📌 İzle", key=f"fwd_m_wat_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watchlist", it)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with b3:
-            if st.button(
-                "✅ İzledim", key=f"fwd_m_wed_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watched", it)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with b4:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"fwd_mov_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_fwd_mov_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Film")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
+      with st.expander("📌 İzleyeceği Filmler"):
+        render_media_list(f_w_movies, "watch_mov")
 
-      st.write("✅ **İzlediği Diziler:**")
-      if f_wd_shows:
-        for it in f_wd_shows:
-          st.write(f"**{it['title']}**")
-          if it.get("poster"):
-            st.image(it["poster"], width=80)
+      with st.expander("📌 İzleyeceği Diziler"):
+        render_media_list(f_w_shows, "watch_sho")
 
-          b1, b2, b3, b4 = st.columns([1, 1, 1, 2])
-          with b1:
-            if st.button(
-                "❤️ Favori", key=f"fwd_s_fav_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("favorites", it)
-              st.success("Favorilere eklendi!")
-              st.rerun()
-          with b2:
-            if st.button(
-                "📌 İzle", key=f"fwd_s_wat_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watchlist", it)
-              st.success("İzleneceklere eklendi!")
-              st.rerun()
-          with b3:
-            if st.button(
-                "✅ İzledim", key=f"fwd_s_wed_{selected_friend}_{it['title']}"
-            ):
-              add_to_list("watched", it)
-              st.success("İzlenenlere eklendi!")
-              st.rerun()
-          with b4:
-            with st.popover("📤 Paylaş"):
-              st.write("Kime gönderilsin?")
-              if friends:
-                tf = st.selectbox(
-                    "Arkadaş",
-                    friends,
-                    key=f"fwd_sho_{selected_friend}_{it['title']}",
-                )
-                if st.button(
-                    "Gönder", key=f"btn_fwd_sho_{selected_friend}_{it['title']}"
-                ):
-                  send_media_to_chat(tf, it["title"], "Dizi")
-              else:
-                st.warning("Arkadaşın yok.")
-          st.divider()
-      else:
-        st.write("Boş.")
+      with st.expander("✅ İzlediği Filmler"):
+        render_media_list(f_wd_movies, "watched_mov")
+
+      with st.expander("✅ İzlediği Diziler"):
+        render_media_list(f_wd_shows, "watched_sho")
+
+      with st.expander("⏳ Yarıda Kalan Filmleri"):
+        render_media_list(f_half_movies, "half_mov")
+
+      with st.expander("⏳ Yarıda Kalan Dizileri"):
+        render_media_list(f_half_shows, "half_sho")
+
   else:
     st.info("Henüz ekli bir arkadaşın yok.")
 
@@ -1781,7 +1587,6 @@ with tab_sohbet:
             formatted_time = ""
             if raw_time:
               try:
-                # Z harfini temizleyip nesneye çeviriyoruz ve üstüne net +3 saat ekliyoruz:
                 clean_time = raw_time.replace("Z", "").split("+")[0]
                 dt_obj = datetime.fromisoformat(clean_time) + timedelta(hours=3)
                 formatted_time = dt_obj.strftime("%d.%m.%Y %H:%M")
@@ -1843,7 +1648,6 @@ with tab_kio:
 
     with st.chat_message("assistant"):
       with st.spinner("Güncel veriler taranıyor..."):
-        # DuckDuckGo ile güncel web araması
         search_results_text = ""
         try:
           with DDGS() as ddgs:
@@ -1860,7 +1664,6 @@ with tab_kio:
         except Exception as e:
           search_results_text = ""
 
-        # Groq altyapısını kullanan OpenAI istemcisi ile yanıt üretme
         try:
           client = OpenAI(
               api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1"
@@ -1882,7 +1685,7 @@ with tab_kio:
           completion = client.chat.completions.create(
               model="openai/gpt-oss-120b",
               messages=messages,
-              temperature=0.3,  # Daha odaklı ve net sonuç için sıcaklığı biraz düşürdük
+              temperature=0.3,
           )
           response_text = completion.choices[0].message.content
         except Exception as e:
