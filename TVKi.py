@@ -39,19 +39,12 @@ st.markdown(
     .stApp { background-color: #121212; color: #e0e0e0; }
     h1, h2, h3 { color: #ffffff !important; }
     
-    /* iOS PWA klavye ve odaklanma sorunu için düzeltme */
+    /* Sadece input alanlarının iOS'te zoom yapmasını engelleyen güvenli ayar */
     .stTextInput input, .stTextArea textarea { 
         background-color: #1e1e1e !important; 
         color: white !important; 
         border-radius: 8px !important;
         font-size: 16px !important; 
-    }
-    
-    /* PWA modunda sayfa kaydırma ve yükseklik sabitleme */
-    html, body, [data-testid="stAppViewContainer"] {
-        height: 100%;
-        overflow: auto;
-        -webkit-overflow-scrolling: touch;
     }
     </style>
 """,
