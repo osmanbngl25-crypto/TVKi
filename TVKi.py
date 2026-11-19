@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import random
+import re
 from ddgs import DDGS
-from groq import Groq
+from openai import OpenAI
 import requests
 from supabase import create_client
 import streamlit as st
-from openai import OpenAI
 
 current_user_profile_temp = None
 SUPABASE_URL_temp = st.secrets.get("SUPABASE_URL")
@@ -22,7 +22,7 @@ if SUPABASE_URL_temp and SUPABASE_KEY_temp:
       )
       if res_p.data:
         current_user_profile_temp = res_p.data[0].get("avatar_url")
-  except:
+  except Exception:
     pass
 
 p_icon = current_user_profile_temp if current_user_profile_temp else "logo.png"
@@ -96,7 +96,7 @@ if "username" in st.query_params and not st.session_state.logged_in:
       if chk_user.data:
         st.session_state.logged_in = True
         st.session_state.username = saved_uname
-    except:
+    except Exception:
       pass
 
 if st.session_state.logged_in:
@@ -162,7 +162,8 @@ if not st.session_state.logged_in:
 
 
 # --- YARDIMCI FONKSİYONLAR ---
-def get_user_lists(uname, l_type):
+@st.cache_data(ttl=30)
+def _cached_user_lists(uname, l_type):
   if not supabase:
     return []
   try:
@@ -174,7 +175,7 @@ def get_user_lists(uname, l_type):
         .execute()
     )
     return res.data
-  except:
+  except Exception:
     try:
       res = (
           supabase.table("user_lists")
@@ -184,11 +185,16 @@ def get_user_lists(uname, l_type):
           .execute()
       )
       return res.data
-    except:
+    except Exception:
       return []
 
 
-def get_user_profile(uname):
+def get_user_lists(uname, l_type):
+  return _cached_user_lists(uname, l_type)
+
+
+@st.cache_data(ttl=30)
+def _cached_user_profile(uname):
   if not supabase:
     return {"username": uname, "full_name": "", "avatar_url": ""}
   try:
@@ -200,12 +206,17 @@ def get_user_profile(uname):
     )
     if res.data:
       return res.data[0]
-  except:
+  except Exception:
     pass
   return {"username": uname, "full_name": "", "avatar_url": ""}
 
 
-def get_accepted_friends(uname):
+def get_user_profile(uname):
+  return _cached_user_profile(uname)
+
+
+@st.cache_data(ttl=30)
+def _cached_accepted_friends(uname):
   if not supabase:
     return []
   try:
@@ -218,8 +229,56 @@ def get_accepted_friends(uname):
         .data
     )
     return [f["following"] for f in res]
-  except:
+  except Exception:
     return []
+
+
+def get_accepted_friends(uname):
+  return _cached_accepted_friends(uname)
+
+
+def invalidate_user_caches():
+  try:
+    _cached_user_lists.clear()
+    _cached_user_profile.clear()
+    _cached_accepted_friends.clear()
+  except Exception:
+    pass
+
+
+def normalize_title_for_match(title_str):
+  if not title_str:
+    return ""
+  cleaned = re.sub(r"\(\d{4}\)", "", title_str).strip().lower()
+  cleaned = re.sub(r"\s+", " ", cleaned)
+  return cleaned
+
+
+def detect_sequel_number(raw_title):
+  if not raw_title:
+    return None
+  t = raw_title.lower().strip()
+  m = re.search(
+      r"(?:\b(?:bölüm|kısım|part|vol\.?|chapter)\s*|\s+)([2-9]|1\d)\b", t
+  )
+  if m:
+    return int(m.group(1))
+  roman_map = {"ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6}
+  for rom, num in roman_map.items():
+    if re.search(rf"\b{rom}\b", t):
+      return num
+  return None
+
+
+def base_series_key(raw_title):
+  if not raw_title:
+    return ""
+  t = re.sub(r"\(\d{4}\)", "", raw_title).lower().strip()
+  t = re.sub(r"\b(bölüm|kısım|part|vol\.?|chapter)\s*\d+\b", "", t)
+  t = re.sub(r"\b(ii|iii|iv|v|vi)\b", "", t)
+  t = re.sub(r"\s+\d+$", "", t)
+  t = re.sub(r"[:\-–—]+.*$", "", t)
+  return re.sub(r"\s+", " ", t).strip()
 
 
 def send_media_to_chat(receiver, media_title, media_type):
@@ -237,6 +296,7 @@ def send_media_to_chat(receiver, media_title, media_type):
     st.error(f"Gönderilemedi: {e}")
 
 
+@st.cache_data(ttl=300)
 def get_movie_cast_detailed(media_id, tmdb_type):
   try:
     url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/credits?api_key={TMDB_API_KEY}&language=tr-TR"
@@ -254,10 +314,11 @@ def get_movie_cast_detailed(media_id, tmdb_type):
       )
       actors.append({"id": actor_id, "name": name, "poster": profile_url})
     return actors
-  except:
+  except Exception:
     return []
 
 
+@st.cache_data(ttl=300)
 def get_actor_filmography(actor_id):
   try:
     url = f"https://api.themoviedb.org/3/person/{actor_id}/combined_credits?api_key={TMDB_API_KEY}&language=tr-TR"
@@ -294,10 +355,11 @@ def get_actor_filmography(actor_id):
 
     valid_media.sort(key=lambda x: x["year"], reverse=True)
     return valid_media
-  except:
+  except Exception:
     return []
 
 
+@st.cache_data(ttl=300)
 def get_media_trailer(media_id, tmdb_type):
   try:
     url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/videos?api_key={TMDB_API_KEY}&language=tr-TR"
@@ -317,9 +379,161 @@ def get_media_trailer(media_id, tmdb_type):
           "Teaser",
       ]:
         return f"https://www.youtube.com/watch?v={vid.get('key')}"
-  except:
+  except Exception:
     pass
   return None
+
+
+@st.cache_data(ttl=300)
+def get_tmdb_genres(tmdb_type):
+  try:
+    g_url = f"https://api.themoviedb.org/3/genre/{tmdb_type}/list?api_key={TMDB_API_KEY}&language=tr-TR"
+    g_res = requests.get(g_url, timeout=10).json()
+    return {g["name"]: g["id"] for g in g_res.get("genres", [])}
+  except Exception:
+    return {}
+
+
+def is_sequel_without_first_watched(
+    item, tmdb_t_type, watched_titles_norm, watched_series_bases
+):
+  raw_title = item.get("title") if tmdb_t_type == "movie" else item.get("name")
+  if not raw_title:
+    return False
+
+  seq_num = detect_sequel_number(raw_title)
+  b_key = base_series_key(raw_title)
+
+  if seq_num and seq_num >= 2:
+    if b_key and b_key not in watched_series_bases:
+      return True
+
+  if tmdb_t_type == "movie" and item.get("id"):
+    try:
+      m_detail_url = f"https://api.themoviedb.org/3/movie/{item['id']}?api_key={TMDB_API_KEY}&language=tr-TR"
+      m_detail = requests.get(m_detail_url, timeout=6).json()
+      coll = m_detail.get("belongs_to_collection")
+      if coll and coll.get("id"):
+        coll_url = f"https://api.themoviedb.org/3/collection/{coll['id']}?api_key={TMDB_API_KEY}&language=tr-TR"
+        parts = requests.get(coll_url, timeout=6).json().get("parts", [])
+        dated_parts = [p for p in parts if p.get("release_date")]
+        dated_parts.sort(key=lambda x: x.get("release_date", ""))
+        if dated_parts and len(dated_parts) > 1:
+          first_part = dated_parts[0]
+          if first_part.get("id") != item.get("id"):
+            f_title_norm = normalize_title_for_match(
+                first_part.get("title", "")
+            )
+            f_base = base_series_key(first_part.get("title", ""))
+            if f_title_norm not in watched_titles_norm and (
+                not f_base or f_base not in watched_series_bases
+            ):
+              return True
+    except Exception:
+      pass
+
+  return False
+
+
+def fetch_quality_recommendations(
+    uname, wiz_type, tmdb_t_type, selected_genre_name, selected_genre_id
+):
+  watched_items = get_user_lists(uname, "watched")
+  fav_items = get_user_lists(uname, "favorites")
+
+  excluded_norm = set()
+  watched_norm = set()
+  watched_bases = set()
+
+  for w in watched_items:
+    t_norm = normalize_title_for_match(w.get("title", ""))
+    if t_norm:
+      excluded_norm.add(t_norm)
+      watched_norm.add(t_norm)
+      b = base_series_key(w.get("title", ""))
+      if b:
+        watched_bases.add(b)
+
+  for f in fav_items:
+    t_norm = normalize_title_for_match(f.get("title", ""))
+    if t_norm:
+      excluded_norm.add(t_norm)
+
+  candidate_pool = []
+  pages_to_try = random.sample(range(1, 13), k=min(4, 12))
+
+  for pg in pages_to_try:
+    params = (
+        f"api_key={TMDB_API_KEY}&language=tr-TR"
+        f"&sort_by=popularity.desc&vote_count.gte=150&vote_average.gte=6.2&page={pg}"
+    )
+    if selected_genre_name == "K-Drama":
+      drama_id = None
+      if tmdb_t_type == "tv":
+        tv_g = get_tmdb_genres("tv")
+        drama_id = tv_g.get("Dram") or tv_g.get("Drama")
+      params += "&with_origin_country=KR"
+      if drama_id:
+        params += f"&with_genres={drama_id}"
+    elif selected_genre_id:
+      params += f"&with_genres={selected_genre_id}"
+
+    try:
+      url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{params}"
+      resp = requests.get(url, timeout=10)
+      if resp.status_code == 200:
+        results = resp.json().get("results", [])
+        for r in results:
+          raw_t = r.get("title") if tmdb_t_type == "movie" else r.get("name")
+          if not raw_t or not r.get("poster_path"):
+            continue
+          if normalize_title_for_match(raw_t) in excluded_norm:
+            continue
+          candidate_pool.append(r)
+    except Exception:
+      continue
+
+  if len(candidate_pool) < 10:
+    try:
+      fallback_params = (
+          f"api_key={TMDB_API_KEY}&language=tr-TR"
+          f"&sort_by=vote_count.desc&vote_count.gte=50&vote_average.gte=5.8&page=1"
+      )
+      if selected_genre_name == "K-Drama":
+        fallback_params += "&with_origin_country=KR"
+      elif selected_genre_id:
+        fallback_params += f"&with_genres={selected_genre_id}"
+      url_fb = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{fallback_params}"
+      resp_fb = requests.get(url_fb, timeout=10)
+      if resp_fb.status_code == 200:
+        for r in resp_fb.json().get("results", []):
+          raw_t = r.get("title") if tmdb_t_type == "movie" else r.get("name")
+          if raw_t and normalize_title_for_match(raw_t) not in excluded_norm:
+            candidate_pool.append(r)
+    except Exception:
+      pass
+
+  seen_ids = set()
+  unique_pool = []
+  for r in candidate_pool:
+    rid = r.get("id")
+    if rid not in seen_ids:
+      seen_ids.add(rid)
+      unique_pool.append(r)
+
+  random.shuffle(unique_pool)
+
+  final_picks = []
+  for item in unique_pool:
+    if is_sequel_without_first_watched(
+        item, tmdb_t_type, watched_norm, watched_bases
+    ):
+      continue
+    final_picks.append(item)
+    if len(final_picks) >= 10:
+      break
+
+  return final_picks
 
 
 def add_to_list(l_type, m_data):
@@ -327,13 +541,14 @@ def add_to_list(l_type, m_data):
     return
   try:
     m_type = m_data.get("media_type") or m_data.get("type", "Film")
+    m_title = m_data["title"]
 
     chk = (
         supabase.table("user_lists")
         .select("*")
         .eq("username", st.session_state.username)
         .eq("list_type", l_type)
-        .eq("title", m_data["title"])
+        .eq("title", m_title)
         .execute()
     )
     if not chk.data:
@@ -341,19 +556,29 @@ def add_to_list(l_type, m_data):
         supabase.table("user_lists").insert({
             "username": st.session_state.username,
             "list_type": l_type,
-            "title": m_data["title"],
+            "title": m_title,
             "media_type": m_type,
             "poster": m_data.get("poster"),
             "progress": "",
         }).execute()
-      except:
+      except Exception:
         supabase.table("user_lists").insert({
             "username": st.session_state.username,
             "list_type": l_type,
-            "title": m_data["title"],
+            "title": m_title,
             "media_type": m_type,
             "poster": m_data.get("poster"),
         }).execute()
+
+    if l_type == "watched":
+      try:
+        supabase.table("user_lists").delete().eq(
+            "username", st.session_state.username
+        ).eq("list_type", "watchlist").eq("title", m_title).execute()
+      except Exception:
+        pass
+
+    invalidate_user_caches()
   except Exception as e:
     st.error(f"Hata: {e}")
 
@@ -365,6 +590,7 @@ def update_progress_in_db(l_type, title, progress_val):
     supabase.table("user_lists").update({"progress": progress_val}).eq(
         "username", st.session_state.username
     ).eq("list_type", l_type).eq("title", title).execute()
+    invalidate_user_caches()
   except Exception as e:
     st.error(f"Kayıt hatası: {e}")
 
@@ -376,6 +602,7 @@ def remove_from_list(l_type, title):
     supabase.table("user_lists").delete().eq(
         "username", st.session_state.username
     ).eq("list_type", l_type).eq("title", title).execute()
+    invalidate_user_caches()
   except Exception as e:
     st.error(f"Hata: {e}")
 
@@ -394,7 +621,7 @@ with top_col1:
     else:
       try:
         st.image("logo.png", width=45)
-      except:
+      except Exception:
         st.markdown("🎬")
   with cols_h[1]:
     st.markdown(f"### {c_name} (@{st.session_state.username}) | TVKi")
@@ -630,7 +857,9 @@ with tab_ana:
             with col3:
               if st.button("✅ İzledim", key=f"wd_{index}"):
                 add_to_list("watched", m_data)
-                st.success("İzlenenlere eklendi!")
+                st.success(
+                    "İzlenenlere eklendi! (Varsa İzlenecek listesinden çıkarıldı)"
+                )
                 st.rerun()
             with col4:
               if st.button("⏳ Yarıda", key=f"half_{index}"):
@@ -657,8 +886,8 @@ with tab_ana:
                 )
             with col7:
               if st.button("🎬 Fragman", key=f"trailer_btn_{index}"):
-                st.session_state[f"show_trailer_{index}"] = not st.session_state.get(
-                    f"show_trailer_{index}", False
+                st.session_state[f"show_trailer_{index}"] = (
+                    not st.session_state.get(f"show_trailer_{index}", False)
                 )
 
             if st.session_state.get(f"show_trailer_{index}", False):
@@ -699,8 +928,8 @@ with tab_ana:
 with tab_ne_izlesem:
   st.title("✨ Ne İzlemeliyim?")
   st.write(
-      "Kararsız mı kaldın? İçerik türünü ve istediğin türü seç, sana harika"
-      " öneriler getirelim!"
+      "Kararsız mı kaldın? İçerik türünü ve istediğin türü seç, sana sevilen"
+      " ve kaliteli rastgele öneriler getirelim!"
   )
 
   col_wizard1, col_wizard2, col_wizard3 = st.columns([3, 4, 3])
@@ -710,23 +939,19 @@ with tab_ne_izlesem:
     )
 
   tmdb_t_type = "movie" if wiz_type == "Film" else "tv"
-  genres_dict = {}
-  try:
-    g_url = f"https://api.themoviedb.org/3/genre/{tmdb_t_type}/list?api_key={TMDB_API_KEY}&language=tr-TR"
-    g_res = requests.get(g_url, timeout=10).json()
-    genres_dict = {g["name"]: g["id"] for g in g_res.get("genres", [])}
-  except Exception as e:
-    st.error(f"Türler yüklenirken hata oluştu: {e}")
+  genres_dict = get_tmdb_genres(tmdb_t_type)
 
   with col_wizard2:
     if genres_dict:
       genre_options = [""] + list(genres_dict.keys())
+      if "K-Drama" not in genre_options:
+        genre_options.append("K-Drama")
       selected_genre_name = st.selectbox(
-          "Tür", genre_options, index=0, key="wiz_genre"
+          "Tür / Konu", genre_options, index=0, key="wiz_genre"
       )
 
-      if selected_genre_name:
-        selected_genre_id = genres_dict[selected_genre_name]
+      if selected_genre_name and selected_genre_name != "K-Drama":
+        selected_genre_id = genres_dict.get(selected_genre_name)
       else:
         selected_genre_id = None
     else:
@@ -755,27 +980,23 @@ with tab_ne_izlesem:
       if k.startswith("wiz_show_trailer_"):
         st.session_state[k] = False
 
-    if selected_genre_id:
-      try:
-        rand_page = random.randint(1, 10)
-        discover_url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?api_key={TMDB_API_KEY}&language=tr-TR&with_genres={selected_genre_id}&page={rand_page}"
-        disc_response = requests.get(discover_url, timeout=10)
+    if selected_genre_name:
+      st.session_state.wiz_results_cache = fetch_quality_recommendations(
+          st.session_state.username,
+          wiz_type,
+          tmdb_t_type,
+          selected_genre_name,
+          selected_genre_id,
+      )
 
-        if disc_response.status_code == 200:
-          disc_res = disc_response.json().get("results", [])
-          if disc_res:
-            random.shuffle(disc_res)
-            st.session_state.wiz_results_cache = disc_res[:10]
-      except Exception:
-        pass
-
-  if not selected_genre_id:
-    st.info("👆 Başlamak için yukarıdan lütfen bir Tür seç!")
+  if not selected_genre_name:
+    st.info("👆 Başlamak için yukarıdan lütfen bir Tür / Konu seç!")
   else:
     recommendations = st.session_state.wiz_results_cache
     if recommendations:
       st.success(
-          f"Seçilen türe uygun {len(recommendations)} öneri listeleniyor:"
+          f"Seçilen türe uygun {len(recommendations)} kaliteli öneri"
+          " listeleniyor:"
       )
       friends_list = get_accepted_friends(st.session_state.username)
 
@@ -825,7 +1046,9 @@ with tab_ne_izlesem:
         with c_w3:
           if st.button("✅ İzledim", key=f"wiz_wd_{idx}"):
             add_to_list("watched", m_data)
-            st.success("İzlenenlere eklendi!")
+            st.success(
+                "İzlenenlere eklendi! (Varsa İzlenecek listesinden çıkarıldı)"
+            )
             st.rerun()
         with c_w4:
           if st.button("⏳ Yarıda", key=f"wiz_half_{idx}"):
@@ -845,8 +1068,8 @@ with tab_ne_izlesem:
               st.warning("Henüz arkadaşın yok.")
         with c_w6:
           if st.button("🎬 Fragman", key=f"wiz_trailer_btn_{idx}"):
-            st.session_state[f"wiz_show_trailer_{idx}"] = not st.session_state.get(
-                f"wiz_show_trailer_{idx}", False
+            st.session_state[f"wiz_show_trailer_{idx}"] = (
+                not st.session_state.get(f"wiz_show_trailer_{idx}", False)
             )
 
         if st.session_state.get(f"wiz_show_trailer_{idx}", False):
@@ -1200,6 +1423,7 @@ with tab_profil:
       supabase.table("users").update(
           {"full_name": new_name, "avatar_url": new_avatar}
       ).eq("username", st.session_state.username).execute()
+      invalidate_user_caches()
       st.success("Profil güncellendi!")
       st.rerun()
 
@@ -1223,7 +1447,7 @@ with tab_profil:
           .execute()
           .data
       )
-    except:
+    except Exception:
       pass
   st.write(
       f"👥 Takipçi: **{len(followers)}** | Takip Edilen: **{len(following)}**"
@@ -1236,6 +1460,7 @@ with tab_profil:
       supabase.table("users").delete().eq(
           "username", st.session_state.username
       ).execute()
+      invalidate_user_caches()
       st.session_state.logged_in = False
       st.session_state.username = ""
       if "username" in st.query_params:
@@ -1286,14 +1511,13 @@ with tab_ara:
                   .data
               )
               if not existing_f:
-                if st.button(
-                    f"Takip İsteği Gönder", key=f"req_{u['username']}"
-                ):
+                if st.button("Takip İsteği Gönder", key=f"req_{u['username']}"):
                   supabase.table("follows").insert({
                       "follower": st.session_state.username,
                       "following": u["username"],
                       "status": "pending",
                   }).execute()
+                  invalidate_user_caches()
                   st.success("İstek gönderildi!")
                   st.rerun()
               else:
@@ -1301,7 +1525,7 @@ with tab_ara:
             st.divider()
         else:
           st.warning("Kullanıcı bulunamadı.")
-      except:
+      except Exception:
         st.warning("Arama sırasında hata oluştu.")
 
 
@@ -1319,7 +1543,7 @@ with tab_istek:
           .execute()
           .data
       )
-    except:
+    except Exception:
       pass
 
   if reqs:
@@ -1342,11 +1566,13 @@ with tab_istek:
             supabase.table("follows").update({"status": "accepted"}).eq(
                 "id", r["id"]
             ).execute()
+            invalidate_user_caches()
             st.success("İstek kabul edildi!")
             st.rerun()
         with col2:
           if st.button("Reddet", key=f"rej_{r['follower']}"):
             supabase.table("follows").delete().eq("id", r["id"]).execute()
+            invalidate_user_caches()
             st.rerun()
         with col3:
           if st.button("Engelle", key=f"blk_{r['follower']}"):
@@ -1355,6 +1581,7 @@ with tab_istek:
                 "blocked": r["follower"],
             }).execute()
             supabase.table("follows").delete().eq("id", r["id"]).execute()
+            invalidate_user_caches()
             st.success("Kullanıcı engellendi.")
             st.rerun()
       st.divider()
@@ -1369,6 +1596,7 @@ with tab_arkadas:
     st.title("Arkadaşlarım ve Listeleri")
   with col_head2:
     if st.button("🔄 Yenile", key="btn_refresh_friends"):
+      invalidate_user_caches()
       st.rerun()
 
   friends = get_accepted_friends(st.session_state.username)
@@ -1564,7 +1792,7 @@ with tab_sohbet:
               .execute()
               .data
           )
-        except:
+        except Exception:
           pass
 
       chat_container = st.container(height=400)
@@ -1583,7 +1811,7 @@ with tab_sohbet:
                 clean_time = raw_time.replace("Z", "").split("+")[0]
                 dt_obj = datetime.fromisoformat(clean_time) + timedelta(hours=3)
                 formatted_time = dt_obj.strftime("%d.%m.%Y %H:%M")
-              except:
+              except Exception:
                 formatted_time = raw_time[:16].replace("T", " ")
 
             col_msg, col_time = st.columns([7, 3])
@@ -1654,7 +1882,7 @@ with tab_kio:
                     f"\n- Başlık: {r.get('title')}\n  İçerik:"
                     f" {r.get('body')}\n  Kaynak: {r.get('href')}"
                 )
-        except Exception as e:
+        except Exception:
           search_results_text = ""
 
         try:
