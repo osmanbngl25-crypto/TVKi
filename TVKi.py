@@ -64,13 +64,14 @@ if "wiz_last_type" not in st.session_state:
 
 # Tarayıcı Hafızasından Oturum Kurtarma (Kalıcı Giriş Ekstresi)
 if "username" in st.query_params and not st.session_state.logged_in:
-  saved_uname = st.query_params["username"]
-  if supabase:
+  saved_uname = str(st.query_params["username"]).strip()
+  if saved_uname and supabase:
     try:
       chk_user = (
           supabase.table("users")
           .select("username")
           .eq("username", saved_uname)
+          .limit(1)
           .execute()
       )
       if chk_user.data:
@@ -79,11 +80,11 @@ if "username" in st.query_params and not st.session_state.logged_in:
     except Exception:
       pass
 
-if st.session_state.logged_in:
-  st.query_params["username"] = st.session_state.username
-else:
-  if "username" in st.query_params:
-    del st.query_params["username"]
+if st.session_state.logged_in and st.session_state.username:
+  if st.query_params.get("username") != st.session_state.username:
+    st.query_params["username"] = st.session_state.username
+elif "username" in st.query_params:
+  del st.query_params["username"]
 
 # --- GİRİŞ / KAYIT Ekranı ---
 if not st.session_state.logged_in:
@@ -109,6 +110,7 @@ if not st.session_state.logged_in:
               supabase.table("users")
               .select("username")
               .eq("username", k_adi)
+              .limit(1)
               .execute()
           )
           if ex.data:
@@ -127,6 +129,7 @@ if not st.session_state.logged_in:
               .select("username")
               .eq("username", k_adi)
               .eq("password", sifre)
+              .limit(1)
               .execute()
           )
           if res.data:
@@ -142,7 +145,7 @@ if not st.session_state.logged_in:
 
 
 # --- YARDIMCI FONKSİYONLAR ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def _cached_user_lists(uname, l_type):
   if not supabase:
     return []
@@ -173,7 +176,7 @@ def get_user_lists(uname, l_type):
   return _cached_user_lists(uname, l_type)
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def _cached_user_profile(uname):
   if not supabase:
     return {"username": uname, "full_name": "", "avatar_url": ""}
@@ -182,6 +185,7 @@ def _cached_user_profile(uname):
         supabase.table("users")
         .select("username, full_name, avatar_url")
         .eq("username", uname)
+        .limit(1)
         .execute()
     )
     if res.data:
@@ -195,7 +199,7 @@ def get_user_profile(uname):
   return _cached_user_profile(uname)
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def _cached_accepted_friends(uname):
   if not supabase:
     return []
@@ -657,8 +661,6 @@ with tab_ana:
       "Kategori Seç", ["Film", "Dizi", "Oyuncu"], key="ana_media_type"
   )
 
-  friends_list = get_accepted_friends(st.session_state.username)
-
   if media_type == "Oyuncu":
     search_query = st.text_input(
         "🔍 Oyuncu adı arat...",
@@ -671,6 +673,7 @@ with tab_ana:
         res = requests.get(url, timeout=10).json().get("results", [])
 
         if res:
+          friends_list = get_accepted_friends(st.session_state.username)
           st.success(f"{len(res)} oyuncu bulundu:")
           for index, item in enumerate(res):
             name = item.get("name")
@@ -790,6 +793,7 @@ with tab_ana:
         res = requests.get(url, timeout=10).json().get("results", [])
 
         if res:
+          friends_list = get_accepted_friends(st.session_state.username)
           st.success(f"{len(res)} sonuç bulundu:")
           for index, item in enumerate(res):
             media_id = item.get("id")
@@ -1413,7 +1417,7 @@ with tab_profil:
     try:
       followers = (
           supabase.table("follows")
-          .select("*")
+          .select("follower")
           .eq("following", st.session_state.username)
           .eq("status", "accepted")
           .execute()
@@ -1421,7 +1425,7 @@ with tab_profil:
       )
       following = (
           supabase.table("follows")
-          .select("*")
+          .select("following")
           .eq("follower", st.session_state.username)
           .eq("status", "accepted")
           .execute()
@@ -1484,9 +1488,10 @@ with tab_ara:
 
               existing_f = (
                   supabase.table("follows")
-                  .select("*")
+                  .select("status")
                   .eq("follower", st.session_state.username)
                   .eq("following", u["username"])
+                  .limit(1)
                   .execute()
                   .data
               )
@@ -1517,7 +1522,7 @@ with tab_istek:
     try:
       reqs = (
           supabase.table("follows")
-          .select("*")
+          .select("id, follower")
           .eq("following", st.session_state.username)
           .eq("status", "pending")
           .execute()
@@ -1764,7 +1769,7 @@ with tab_sohbet:
         try:
           msgs = (
               supabase.table("chats")
-              .select("*")
+              .select("sender, message, created_at")
               .or_(
                   f"and(sender.eq.{st.session_state.username},receiver.eq.{chat_partner}),and(sender.eq.{chat_partner},receiver.eq.{st.session_state.username})"
               )
