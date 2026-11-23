@@ -7,29 +7,9 @@ import requests
 from supabase import create_client
 import streamlit as st
 
-current_user_profile_temp = None
-SUPABASE_URL_temp = st.secrets.get("SUPABASE_URL")
-SUPABASE_KEY_temp = st.secrets.get("SUPABASE_KEY")
-if SUPABASE_URL_temp and SUPABASE_KEY_temp:
-  try:
-    temp_sb = create_client(SUPABASE_URL_temp, SUPABASE_KEY_temp)
-    if "username" in st.query_params:
-      res_p = (
-          temp_sb.table("users")
-          .select("avatar_url")
-          .eq("username", st.query_params["username"])
-          .execute()
-      )
-      if res_p.data:
-        current_user_profile_temp = res_p.data[0].get("avatar_url")
-  except Exception:
-    pass
-
-p_icon = current_user_profile_temp if current_user_profile_temp else "logo.png"
-
 st.set_page_config(
     page_title="TVKi",
-    page_icon=p_icon,
+    page_icon="logo.png",
     layout="wide",
 )
 
@@ -89,7 +69,7 @@ if "username" in st.query_params and not st.session_state.logged_in:
     try:
       chk_user = (
           supabase.table("users")
-          .select("*")
+          .select("username")
           .eq("username", saved_uname)
           .execute()
       )
@@ -127,7 +107,7 @@ if not st.session_state.logged_in:
         try:
           ex = (
               supabase.table("users")
-              .select("*")
+              .select("username")
               .eq("username", k_adi)
               .execute()
           )
@@ -144,7 +124,7 @@ if not st.session_state.logged_in:
         try:
           res = (
               supabase.table("users")
-              .select("*")
+              .select("username")
               .eq("username", k_adi)
               .eq("password", sifre)
               .execute()
@@ -545,7 +525,7 @@ def add_to_list(l_type, m_data):
 
     chk = (
         supabase.table("user_lists")
-        .select("*")
+        .select("title")
         .eq("username", st.session_state.username)
         .eq("list_type", l_type)
         .eq("title", m_title)
