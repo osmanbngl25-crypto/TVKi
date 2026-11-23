@@ -378,6 +378,92 @@ def get_tmdb_genres(tmdb_type):
     return {}
 
 
+CUSTOM_GENRE_LIST = [
+    "Aksiyon",
+    "Macera",
+    "Animasyon",
+    "Komedi",
+    "Suç",
+    "Belgesel",
+    "Dram",
+    "Aile",
+    "Fantastik",
+    "Tarih",
+    "Korku",
+    "Müzik",
+    "Gizem",
+    "Romantik",
+    "Bilim-Kurgu",
+    "Gerilim",
+    "Savaş",
+    "Vahşi Batı",
+    "K-Drama",
+    "Anime",
+    "Müzikal",
+    "Biyografi",
+    "Spor",
+    "Marvel",
+    "DC",
+]
+
+STANDARD_GENRE_IDS = {
+    "Aksiyon": {"movie": "28", "tv": "10759"},
+    "Macera": {"movie": "12", "tv": "10759"},
+    "Animasyon": {"movie": "16", "tv": "16"},
+    "Komedi": {"movie": "35", "tv": "35"},
+    "Suç": {"movie": "80", "tv": "80"},
+    "Belgesel": {"movie": "99", "tv": "99"},
+    "Dram": {"movie": "18", "tv": "18"},
+    "Aile": {"movie": "10751", "tv": "10751"},
+    "Fantastik": {"movie": "14", "tv": "10765"},
+    "Tarih": {"movie": "36", "tv": "36"},
+    "Korku": {"movie": "27", "tv": "9648"},
+    "Müzik": {"movie": "10402", "tv": "10402"},
+    "Gizem": {"movie": "9648", "tv": "9648"},
+    "Romantik": {"movie": "10749", "tv": "10749"},
+    "Bilim-Kurgu": {"movie": "878", "tv": "10765"},
+    "Gerilim": {"movie": "53", "tv": "80"},
+    "Savaş": {"movie": "10752", "tv": "10768"},
+    "Vahşi Batı": {"movie": "37", "tv": "37"},
+}
+
+
+def build_discover_filter_query(tmdb_t_type, selected_genre_name, genres_dict):
+  if not selected_genre_name:
+    return ""
+
+  if selected_genre_name == "K-Drama":
+    drama_id = genres_dict.get("Dram") or genres_dict.get("Drama") or "18"
+    return f"&with_origin_country=KR&with_genres={drama_id}"
+
+  if selected_genre_name == "Anime":
+    return "&with_genres=16&with_origin_country=JP"
+
+  if selected_genre_name == "Müzikal":
+    return "&with_keywords=4344"
+
+  if selected_genre_name == "Biyografi":
+    return "&with_keywords=9672|5565"
+
+  if selected_genre_name == "Spor":
+    return "&with_keywords=6075"
+
+  if selected_genre_name == "Marvel":
+    return "&with_companies=420|7505|19551"
+
+  if selected_genre_name == "DC":
+    return "&with_companies=9993|128064|184898|429"
+
+  g_id = genres_dict.get(selected_genre_name)
+  if not g_id and selected_genre_name in STANDARD_GENRE_IDS:
+    g_id = STANDARD_GENRE_IDS[selected_genre_name].get(tmdb_t_type)
+
+  if g_id:
+    return f"&with_genres={g_id}"
+
+  return ""
+
+
 def is_sequel_without_first_watched(
     item, tmdb_t_type, watched_titles_norm, watched_series_bases
 ):
@@ -420,7 +506,7 @@ def is_sequel_without_first_watched(
 
 
 def fetch_quality_recommendations(
-    uname, wiz_type, tmdb_t_type, selected_genre_name, selected_genre_id
+    uname, wiz_type, tmdb_t_type, selected_genre_name, genres_dict
 ):
   watched_items = get_user_lists(uname, "watched")
   fav_items = get_user_lists(uname, "favorites")
@@ -443,24 +529,30 @@ def fetch_quality_recommendations(
     if t_norm:
       excluded_norm.add(t_norm)
 
+  filter_query = build_discover_filter_query(
+      tmdb_t_type, selected_genre_name, genres_dict
+  )
+  is_niche = selected_genre_name in [
+      "Marvel",
+      "DC",
+      "Müzikal",
+      "Biyografi",
+      "Spor",
+      "Anime",
+      "K-Drama",
+  ]
+  max_page = 5 if is_niche else 12
+  min_votes = 40 if is_niche else 150
+
   candidate_pool = []
-  pages_to_try = random.sample(range(1, 13), k=min(4, 12))
+  pages_to_try = random.sample(range(1, max_page + 1), k=min(4, max_page))
 
   for pg in pages_to_try:
     params = (
         f"api_key={TMDB_API_KEY}&language=tr-TR"
-        f"&sort_by=popularity.desc&vote_count.gte=150&vote_average.gte=6.2&page={pg}"
+        f"&sort_by=popularity.desc&vote_count.gte={min_votes}&vote_average.gte=6.0&page={pg}"
+        f"{filter_query}"
     )
-    if selected_genre_name == "K-Drama":
-      drama_id = None
-      if tmdb_t_type == "tv":
-        tv_g = get_tmdb_genres("tv")
-        drama_id = tv_g.get("Dram") or tv_g.get("Drama")
-      params += "&with_origin_country=KR"
-      if drama_id:
-        params += f"&with_genres={drama_id}"
-    elif selected_genre_id:
-      params += f"&with_genres={selected_genre_id}"
 
     try:
       url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{params}"
@@ -481,18 +573,19 @@ def fetch_quality_recommendations(
     try:
       fallback_params = (
           f"api_key={TMDB_API_KEY}&language=tr-TR"
-          f"&sort_by=vote_count.desc&vote_count.gte=50&vote_average.gte=5.8&page=1"
+          f"&sort_by=popularity.desc&vote_count.gte=10&vote_average.gte=5.0&page=1"
+          f"{filter_query}"
       )
-      if selected_genre_name == "K-Drama":
-        fallback_params += "&with_origin_country=KR"
-      elif selected_genre_id:
-        fallback_params += f"&with_genres={selected_genre_id}"
       url_fb = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{fallback_params}"
       resp_fb = requests.get(url_fb, timeout=10)
       if resp_fb.status_code == 200:
         for r in resp_fb.json().get("results", []):
           raw_t = r.get("title") if tmdb_t_type == "movie" else r.get("name")
-          if raw_t and normalize_title_for_match(raw_t) not in excluded_norm:
+          if (
+              raw_t
+              and r.get("poster_path")
+              and normalize_title_for_match(raw_t) not in excluded_norm
+          ):
             candidate_pool.append(r)
     except Exception:
       pass
@@ -926,21 +1019,10 @@ with tab_ne_izlesem:
   genres_dict = get_tmdb_genres(tmdb_t_type)
 
   with col_wizard2:
-    if genres_dict:
-      genre_options = [""] + list(genres_dict.keys())
-      if "K-Drama" not in genre_options:
-        genre_options.append("K-Drama")
-      selected_genre_name = st.selectbox(
-          "Tür / Konu", genre_options, index=0, key="wiz_genre"
-      )
-
-      if selected_genre_name and selected_genre_name != "K-Drama":
-        selected_genre_id = genres_dict.get(selected_genre_name)
-      else:
-        selected_genre_id = None
-    else:
-      selected_genre_name = None
-      selected_genre_id = None
+    genre_options = [""] + CUSTOM_GENRE_LIST
+    selected_genre_name = st.selectbox(
+        "Tür / Konu", genre_options, index=0, key="wiz_genre"
+    )
 
   with col_wizard3:
     st.write("")
@@ -970,7 +1052,7 @@ with tab_ne_izlesem:
           wiz_type,
           tmdb_t_type,
           selected_genre_name,
-          selected_genre_id,
+          genres_dict,
       )
 
   if not selected_genre_name:
