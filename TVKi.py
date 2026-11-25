@@ -27,6 +27,35 @@ st.markdown(
         font-size: 16px !important; 
     }
     </style>
+
+    <script>
+    (function() {
+        function showScreenError(title, detail) {
+            var box = document.getElementById("tvki-debug-box");
+            if (!box) {
+                box = document.createElement("div");
+                box.id = "tvki-debug-box";
+                box.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;background:#b71c1c;color:#fff;padding:12px;font-family:monospace;font-size:12px;max-height:50vh;overflow:auto;word-break:break-word;";
+                (document.body || document.documentElement).appendChild(box);
+            }
+            var item = document.createElement("div");
+            item.style.marginBottom = "8px";
+            item.textContent = "[" + title + "] " + detail;
+            box.appendChild(item);
+        }
+
+        window.addEventListener("error", function(e) {
+            var msg = (e && e.message) ? e.message : "Bilinmeyen JS hatası";
+            var src = (e && e.filename) ? (" (" + e.filename + ":" + e.lineno + ")") : "";
+            showScreenError("JS ERROR", msg + src);
+        }, true);
+
+        window.addEventListener("unhandledrejection", function(e) {
+            var reason = (e && e.reason) ? (e.reason.stack || e.reason.message || String(e.reason)) : "Promise reddedildi";
+            showScreenError("PROMISE ERROR", reason);
+        });
+    })();
+    </script>
 """,
     unsafe_allow_html=True,
 )
