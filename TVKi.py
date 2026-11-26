@@ -90,6 +90,8 @@ if "wiz_last_genre" not in st.session_state:
   st.session_state.wiz_last_genre = None
 if "wiz_last_type" not in st.session_state:
   st.session_state.wiz_last_type = None
+if "wiz_nonce" not in st.session_state:
+  st.session_state.wiz_nonce = 0
 
 # Tarayıcı Hafızasından Oturum Kurtarma (Kalıcı Giriş Ekstresi)
 if "username" in st.query_params and not st.session_state.logged_in:
@@ -174,7 +176,7 @@ if not st.session_state.logged_in:
 
 
 # --- YARDIMCI FONKSİYONLAR ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def _cached_user_lists(uname, l_type):
   if not supabase:
     return []
@@ -205,7 +207,7 @@ def get_user_lists(uname, l_type):
   return _cached_user_lists(uname, l_type)
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def _cached_user_profile(uname):
   if not supabase:
     return {"username": uname, "full_name": "", "avatar_url": ""}
@@ -228,7 +230,7 @@ def get_user_profile(uname):
   return _cached_user_profile(uname)
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def _cached_accepted_friends(uname):
   if not supabase:
     return []
@@ -250,11 +252,31 @@ def get_accepted_friends(uname):
   return _cached_accepted_friends(uname)
 
 
+@st.cache_data(ttl=30)
+def _cached_chat_messages(user_a, user_b):
+  if not supabase or not user_a or not user_b:
+    return []
+  try:
+    return (
+        supabase.table("chats")
+        .select("sender, message, created_at")
+        .or_(
+            f"and(sender.eq.{user_a},receiver.eq.{user_b}),and(sender.eq.{user_b},receiver.eq.{user_a})"
+        )
+        .order("created_at")
+        .execute()
+        .data
+    )
+  except Exception:
+    return []
+
+
 def invalidate_user_caches():
   try:
     _cached_user_lists.clear()
     _cached_user_profile.clear()
     _cached_accepted_friends.clear()
+    _cached_chat_messages.clear()
   except Exception:
     pass
 
@@ -304,16 +326,17 @@ def send_media_to_chat(receiver, media_title, media_type):
         "receiver": receiver,
         "message": msg,
     }).execute()
+    _cached_chat_messages.clear()
     st.success(f"@{receiver} kişisine sohbet üzerinden gönderildi!")
   except Exception as e:
     st.error(f"Gönderilemedi: {e}")
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_movie_cast_detailed(media_id, tmdb_type):
   try:
     url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/credits?api_key={TMDB_API_KEY}&language=tr-TR"
-    res = requests.get(url, timeout=10).json()
+    res = requests.get(url, timeout=6).json()
     cast = res.get("cast", [])
     actors = []
     for actor in cast:
@@ -331,11 +354,11 @@ def get_movie_cast_detailed(media_id, tmdb_type):
     return []
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_actor_filmography(actor_id):
   try:
     url = f"https://api.themoviedb.org/3/person/{actor_id}/combined_credits?api_key={TMDB_API_KEY}&language=tr-TR"
-    res = requests.get(url, timeout=10).json()
+    res = requests.get(url, timeout=6).json()
     cast_list = res.get("cast", [])
 
     valid_media = []
@@ -372,11 +395,11 @@ def get_actor_filmography(actor_id):
     return []
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_media_trailer(media_id, tmdb_type):
   try:
     url = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/videos?api_key={TMDB_API_KEY}&language=tr-TR"
-    res = requests.get(url, timeout=10).json().get("results", [])
+    res = requests.get(url, timeout=5).json().get("results", [])
     for vid in res:
       if vid.get("site") == "YouTube" and vid.get("type") in [
           "Trailer",
@@ -385,7 +408,7 @@ def get_media_trailer(media_id, tmdb_type):
         return f"https://www.youtube.com/watch?v={vid.get('key')}"
 
     url_en = f"https://api.themoviedb.org/3/{tmdb_type}/{media_id}/videos?api_key={TMDB_API_KEY}&language=en-US"
-    res_en = requests.get(url_en, timeout=10).json().get("results", [])
+    res_en = requests.get(url_en, timeout=5).json().get("results", [])
     for vid in res_en:
       if vid.get("site") == "YouTube" and vid.get("type") in [
           "Trailer",
@@ -397,14 +420,36 @@ def get_media_trailer(media_id, tmdb_type):
   return None
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=1800)
 def get_tmdb_genres(tmdb_type):
   try:
     g_url = f"https://api.themoviedb.org/3/genre/{tmdb_type}/list?api_key={TMDB_API_KEY}&language=tr-TR"
-    g_res = requests.get(g_url, timeout=10).json()
+    g_res = requests.get(g_url, timeout=5).json()
     return {g["name"]: g["id"] for g in g_res.get("genres", [])}
   except Exception:
     return {}
+
+
+@st.cache_data(ttl=3600)
+def _cached_movie_collection_first_part(movie_id):
+  try:
+    m_detail_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}&language=tr-TR"
+    m_detail = requests.get(m_detail_url, timeout=4).json()
+    coll = m_detail.get("belongs_to_collection")
+    if coll and coll.get("id"):
+      coll_url = f"https://api.themoviedb.org/3/collection/{coll['id']}?api_key={TMDB_API_KEY}&language=tr-TR"
+      parts = requests.get(coll_url, timeout=4).json().get("parts", [])
+      dated_parts = [p for p in parts if p.get("release_date")]
+      dated_parts.sort(key=lambda x: x.get("release_date", ""))
+      if dated_parts and len(dated_parts) > 1:
+        first_part = dated_parts[0]
+        return {
+            "first_id": first_part.get("id"),
+            "first_title": first_part.get("title", ""),
+        }
+  except Exception:
+    pass
+  return None
 
 
 CUSTOM_GENRE_LIST = [
@@ -508,34 +553,25 @@ def is_sequel_without_first_watched(
       return True
 
   if tmdb_t_type == "movie" and item.get("id"):
-    try:
-      m_detail_url = f"https://api.themoviedb.org/3/movie/{item['id']}?api_key={TMDB_API_KEY}&language=tr-TR"
-      m_detail = requests.get(m_detail_url, timeout=6).json()
-      coll = m_detail.get("belongs_to_collection")
-      if coll and coll.get("id"):
-        coll_url = f"https://api.themoviedb.org/3/collection/{coll['id']}?api_key={TMDB_API_KEY}&language=tr-TR"
-        parts = requests.get(coll_url, timeout=6).json().get("parts", [])
-        dated_parts = [p for p in parts if p.get("release_date")]
-        dated_parts.sort(key=lambda x: x.get("release_date", ""))
-        if dated_parts and len(dated_parts) > 1:
-          first_part = dated_parts[0]
-          if first_part.get("id") != item.get("id"):
-            f_title_norm = normalize_title_for_match(
-                first_part.get("title", "")
-            )
-            f_base = base_series_key(first_part.get("title", ""))
-            if f_title_norm not in watched_titles_norm and (
-                not f_base or f_base not in watched_series_bases
-            ):
-              return True
-    except Exception:
-      pass
+    first_info = _cached_movie_collection_first_part(item["id"])
+    if first_info and first_info.get("first_id") != item.get("id"):
+      f_title_norm = normalize_title_for_match(first_info.get("first_title", ""))
+      f_base = base_series_key(first_info.get("first_title", ""))
+      if f_title_norm not in watched_titles_norm and (
+          not f_base or f_base not in watched_series_bases
+      ):
+        return True
 
   return False
 
 
 def fetch_quality_recommendations(
-    uname, wiz_type, tmdb_t_type, selected_genre_name, genres_dict
+    uname,
+    wiz_type,
+    tmdb_t_type,
+    selected_genre_name,
+    genres_dict,
+    seed_nonce=0,
 ):
   watched_items = get_user_lists(uname, "watched")
   fav_items = get_user_lists(uname, "favorites")
@@ -570,11 +606,12 @@ def fetch_quality_recommendations(
       "Anime",
       "K-Drama",
   ]
-  max_page = 5 if is_niche else 12
+  max_page = 5 if is_niche else 10
   min_votes = 40 if is_niche else 150
 
+  rng = random.Random(f"{uname}-{wiz_type}-{selected_genre_name}-{seed_nonce}")
   candidate_pool = []
-  pages_to_try = random.sample(range(1, max_page + 1), k=min(4, max_page))
+  pages_to_try = rng.sample(range(1, max_page + 1), k=min(2, max_page))
 
   for pg in pages_to_try:
     params = (
@@ -585,7 +622,7 @@ def fetch_quality_recommendations(
 
     try:
       url = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{params}"
-      resp = requests.get(url, timeout=10)
+      resp = requests.get(url, timeout=6)
       if resp.status_code == 200:
         results = resp.json().get("results", [])
         for r in results:
@@ -606,7 +643,7 @@ def fetch_quality_recommendations(
           f"{filter_query}"
       )
       url_fb = f"https://api.themoviedb.org/3/discover/{tmdb_t_type}?{fallback_params}"
-      resp_fb = requests.get(url_fb, timeout=10)
+      resp_fb = requests.get(url_fb, timeout=6)
       if resp_fb.status_code == 200:
         for r in resp_fb.json().get("results", []):
           raw_t = r.get("title") if tmdb_t_type == "movie" else r.get("name")
@@ -627,10 +664,14 @@ def fetch_quality_recommendations(
       seen_ids.add(rid)
       unique_pool.append(r)
 
-  random.shuffle(unique_pool)
+  rng.shuffle(unique_pool)
 
   final_picks = []
+  checked_count = 0
   for item in unique_pool:
+    if checked_count >= 16:
+      break
+    checked_count += 1
     if is_sequel_without_first_watched(
         item, tmdb_t_type, watched_norm, watched_bases
     ):
@@ -716,6 +757,7 @@ def remove_from_list(l_type, title):
 current_user_profile = get_user_profile(st.session_state.username)
 c_name = current_user_profile.get("full_name") or st.session_state.username
 c_avatar = current_user_profile.get("avatar_url")
+shared_friends_list = get_accepted_friends(st.session_state.username)
 
 # --- ÜST BAR ---
 top_col1, top_col2 = st.columns([8, 2])
@@ -792,10 +834,10 @@ with tab_ana:
     if search_query:
       try:
         url = f"https://api.themoviedb.org/3/search/person?api_key={TMDB_API_KEY}&language=tr-TR&query={search_query}"
-        res = requests.get(url, timeout=10).json().get("results", [])
+        res = requests.get(url, timeout=6).json().get("results", [])
 
         if res:
-          friends_list = get_accepted_friends(st.session_state.username)
+          friends_list = shared_friends_list
           st.success(f"{len(res)} oyuncu bulundu:")
           for index, item in enumerate(res):
             name = item.get("name")
@@ -912,10 +954,10 @@ with tab_ana:
     if search_query:
       try:
         url = f"https://api.themoviedb.org/3/search/{tmdb_type}?api_key={TMDB_API_KEY}&language=tr-TR&query={search_query}"
-        res = requests.get(url, timeout=10).json().get("results", [])
+        res = requests.get(url, timeout=6).json().get("results", [])
 
         if res:
-          friends_list = get_accepted_friends(st.session_state.username)
+          friends_list = shared_friends_list
           st.success(f"{len(res)} sonuç bulundu:")
           for index, item in enumerate(res):
             media_id = item.get("id")
@@ -1062,6 +1104,9 @@ with tab_ne_izlesem:
         key="btn_wiz_refresh",
     )
 
+  if refresh_wizard:
+    st.session_state.wiz_nonce += 1
+
   if (
       st.session_state.wiz_last_genre != selected_genre_name
       or st.session_state.wiz_last_type != wiz_type
@@ -1082,6 +1127,7 @@ with tab_ne_izlesem:
           tmdb_t_type,
           selected_genre_name,
           genres_dict,
+          st.session_state.wiz_nonce,
       )
 
   if not selected_genre_name:
@@ -1093,7 +1139,7 @@ with tab_ne_izlesem:
           f"Seçilen türe uygun {len(recommendations)} kaliteli öneri"
           " listeleniyor:"
       )
-      friends_list = get_accepted_friends(st.session_state.username)
+      friends_list = shared_friends_list
 
       for idx, item in enumerate(recommendations):
         media_id = item.get("id")
@@ -1183,7 +1229,7 @@ with tab_ne_izlesem:
 with tab_fav:
   st.title("Favorilerim")
   items = get_user_lists(st.session_state.username, "favorites")
-  friends_list = get_accepted_friends(st.session_state.username)
+  friends_list = shared_friends_list
 
   fav_movies = [i for i in items if i["media_type"] == "Film"]
   fav_shows = [i for i in items if i["media_type"] == "Dizi"]
@@ -1273,7 +1319,7 @@ with tab_fav:
 with tab_watch:
   st.title("İzleyecek Listen")
   items = get_user_lists(st.session_state.username, "watchlist")
-  friends_list = get_accepted_friends(st.session_state.username)
+  friends_list = shared_friends_list
 
   w_movies = [i for i in items if i["media_type"] == "Film"]
   w_shows = [i for i in items if i["media_type"] == "Dizi"]
@@ -1335,7 +1381,7 @@ with tab_watch:
 with tab_watched:
   st.title("İzlediklerim")
   items = get_user_lists(st.session_state.username, "watched")
-  friends_list = get_accepted_friends(st.session_state.username)
+  friends_list = shared_friends_list
 
   wd_movies = [i for i in items if i["media_type"] == "Film"]
   wd_shows = [i for i in items if i["media_type"] == "Dizi"]
@@ -1397,7 +1443,7 @@ with tab_watched:
 with tab_yarida:
   st.title("Yarıda Kalanlar")
   items = get_user_lists(st.session_state.username, "unfinished")
-  friends_list = get_accepted_friends(st.session_state.username)
+  friends_list = shared_friends_list
 
   half_movies = [i for i in items if i["media_type"] == "Film"]
   half_shows = [i for i in items if i["media_type"] == "Dizi"]
@@ -1496,7 +1542,7 @@ with tab_yarida:
 # 7. PROFİL & AYARLAR
 with tab_profil:
   st.title("Profil Ayarları")
-  user_info = get_user_profile(st.session_state.username)
+  user_info = current_user_profile
 
   new_name = st.text_input(
       "Ad Soyad / Görünen Ad",
@@ -1523,21 +1569,13 @@ with tab_profil:
       st.rerun()
 
   followers = []
-  following = []
+  following = shared_friends_list
   if supabase:
     try:
       followers = (
           supabase.table("follows")
           .select("follower")
           .eq("following", st.session_state.username)
-          .eq("status", "accepted")
-          .execute()
-          .data
-      )
-      following = (
-          supabase.table("follows")
-          .select("following")
-          .eq("follower", st.session_state.username)
           .eq("status", "accepted")
           .execute()
           .data
@@ -1695,7 +1733,7 @@ with tab_arkadas:
       invalidate_user_caches()
       st.rerun()
 
-  friends = get_accepted_friends(st.session_state.username)
+  friends = shared_friends_list
 
   if friends:
     friend_profiles = {f: get_user_profile(f) for f in friends}
@@ -1864,7 +1902,7 @@ with tab_arkadas:
 with tab_sohbet:
   st.title("Sohbet Odası")
 
-  friends = get_accepted_friends(st.session_state.username)
+  friends = shared_friends_list
 
   if friends:
     friend_profiles = {f: get_user_profile(f) for f in friends}
@@ -1875,21 +1913,7 @@ with tab_sohbet:
         key="chat_partner_box",
     )
     if chat_partner:
-      msgs = []
-      if supabase:
-        try:
-          msgs = (
-              supabase.table("chats")
-              .select("sender, message, created_at")
-              .or_(
-                  f"and(sender.eq.{st.session_state.username},receiver.eq.{chat_partner}),and(sender.eq.{chat_partner},receiver.eq.{st.session_state.username})"
-              )
-              .order("created_at")
-              .execute()
-              .data
-          )
-        except Exception:
-          pass
+      msgs = _cached_chat_messages(st.session_state.username, chat_partner)
 
       chat_container = st.container(height=400)
       with chat_container:
@@ -1930,6 +1954,7 @@ with tab_sohbet:
                   "receiver": chat_partner,
                   "message": new_msg,
               }).execute()
+              _cached_chat_messages.clear()
               st.rerun()
             except Exception as e:
               st.error(f"Mesaj gönderilemedi: {e}")
