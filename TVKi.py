@@ -174,7 +174,7 @@ if not st.session_state.logged_in:
 
 
 # --- YARDIMCI FONKSİYONLAR ---
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def _cached_user_lists(uname, l_type):
   if not supabase:
     return []
@@ -205,7 +205,7 @@ def get_user_lists(uname, l_type):
   return _cached_user_lists(uname, l_type)
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def _cached_user_profile(uname):
   if not supabase:
     return {"username": uname, "full_name": "", "avatar_url": ""}
@@ -228,7 +228,7 @@ def get_user_profile(uname):
   return _cached_user_profile(uname)
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def _cached_accepted_friends(uname):
   if not supabase:
     return []
@@ -248,22 +248,6 @@ def _cached_accepted_friends(uname):
 
 def get_accepted_friends(uname):
   return _cached_accepted_friends(uname)
-
-
-def warm_session_caches(uname):
-  if not supabase or not uname:
-    return
-  try:
-    get_user_profile(uname)
-    for l_t in ("favorites", "watchlist", "watched", "unfinished"):
-      get_user_lists(uname, l_t)
-    friends = get_accepted_friends(uname)
-    for f in friends:
-      get_user_profile(f)
-      for l_t in ("favorites", "watchlist", "watched", "unfinished"):
-        get_user_lists(f, l_t)
-  except Exception:
-    pass
 
 
 def invalidate_user_caches():
@@ -729,10 +713,6 @@ def remove_from_list(l_type, title):
     st.error(f"Hata: {e}")
 
 
-if not st.session_state.get("caches_warmed_for") == st.session_state.username:
-  warm_session_caches(st.session_state.username)
-  st.session_state["caches_warmed_for"] = st.session_state.username
-
 current_user_profile = get_user_profile(st.session_state.username)
 c_name = current_user_profile.get("full_name") or st.session_state.username
 c_avatar = current_user_profile.get("avatar_url")
@@ -756,7 +736,6 @@ with top_col2:
   if st.button("Çıkış Yap", use_container_width=True):
     st.session_state.logged_in = False
     st.session_state.username = ""
-    st.session_state["caches_warmed_for"] = ""
     if "username" in st.query_params:
       del st.query_params["username"]
     st.rerun()
@@ -1579,7 +1558,6 @@ with tab_profil:
       invalidate_user_caches()
       st.session_state.logged_in = False
       st.session_state.username = ""
-      st.session_state["caches_warmed_for"] = ""
       if "username" in st.query_params:
         del st.query_params["username"]
       st.success("Profil ve tüm verilerin silindi.")
@@ -1715,7 +1693,6 @@ with tab_arkadas:
   with col_head2:
     if st.button("🔄 Yenile", key="btn_refresh_friends"):
       invalidate_user_caches()
-      warm_session_caches(st.session_state.username)
       st.rerun()
 
   friends = get_accepted_friends(st.session_state.username)
